@@ -1,0 +1,29 @@
+---
+description: Bun runtime preferences
+globs:
+---
+
+# Bun Preferences
+
+Always prefer Bun over Node.js/npm for all operations:
+
+- Package manager: `bun install`, `bun add`, `bun remove` (not npm/yarn/pnpm)
+- Running scripts: `bun run dev`, `bun run build` (not npm run)
+- Executing packages: `bunx` (not npx)
+- Running files: `bun script.ts` (not node/ts-node)
+
+Examples:
+```bash
+# Installing dependencies
+bun install
+
+# Adding a package
+bun add zod
+
+# Running dev server
+bun run dev
+
+# Executing a one-off package
+bunx convex dev
+bunx shadcn@latest add button
+```

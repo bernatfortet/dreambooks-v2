@@ -1,0 +1,61 @@
+---
+description: TypeScript-specific patterns and preferences
+globs: **/*.ts, **/*.tsx
+alwaysApply: false
+---
+
+# TypeScript Patterns
+
+## Error Handling with ts-result
+
+Prefer `ts-result` for explicit error handling over try/catch:
+
+```typescript
+import { Ok, Err, Result } from 'ts-results'
+
+// Return Result types for operations that can fail
+function parseBookData(raw: unknown): Result<BookData, string> {
+  if (!raw || typeof raw !== 'object') return Err('Invalid data format')
+
+  const data = raw as Record<string, unknown>
+  if (!data.title) return Err('Missing required field: title')
+
+  const bookData = { title: String(data.title), ... }
+  return Ok(bookData)
+}
+
+// Handle results with early returns
+function processBook(raw: unknown) {
+  const parseResult = parseBookData(raw)
+  if (parseResult.err) return Err(`Failed to parse: ${parseResult.val}`)
+
+  const book = parseResult.val
+  // ... continue with valid data
+  return Ok(book)
+}
+```
+
+## When to Use ts-result vs Throwing
+
+| Scenario                                            | Approach       |
+| --------------------------------------------------- | -------------- |
+| Expected failures (validation, parsing, API errors) | `Result<T, E>` |
+| Programmer errors (invariant violations)            | `throw`        |
+| Truly exceptional (out of memory, network down)     | `throw`        |
+| Crossing module boundaries                          | `Result<T, E>` |
+
+## Type Patterns
+
+- Use `unknown` over `any` when type is truly unknown
+- Prefer type inference where possible, explicit types at boundaries
+- Use discriminated unions for state machines:
+
+```typescript
+type BookStatus = { status: 'pending' } | { status: 'complete'; completedAt: number } | { status: 'error'; errorMessage: string }
+```
+
+## Strict Mode Preferences
+
+- Always use strict mode
+- Prefer `strictNullChecks` - use `?.` and `??` operators
+- Avoid `!` non-null assertions unless absolutely certain

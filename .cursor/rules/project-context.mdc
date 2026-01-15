@@ -1,0 +1,130 @@
+---
+description: Project context and conventions for Dreambooks v2
+globs:
+alwaysApply: true
+---
+
+# Dreambooks v2 - Project Context
+
+## What is Dreambooks?
+
+Dreambooks is a web portal for discovering and exploring children's books. The platform highlights beautiful book covers and provides multiple ways to browse content (by series, author, awards, lexile reading level, etc.).
+
+## Tech Stack
+
+- **Frontend**: Next.js 15 with App Router, Tailwind v4, shadcn/ui
+- **Backend**: Convex (database, serverless functions, file storage, job queue)
+- **Auth**: Convex Auth (Google OAuth + Email magic links)
+- **No separate API layer** - Convex queries/mutations handle all data operations
+
+## Key Architectural Decisions
+
+### ISR for Static Pages
+Book, author, and series pages are statically generated with ISR. Use `fetchQuery` from `convex/nextjs` for server-side data fetching:
+
+```typescript
+import { fetchQuery } from 'convex/nextjs'
+import { api } from '@/convex/_generated/api'
+
+export const revalidate = false // or 86400 for daily
+
+export default async function BookPage({ params }) {
+  const book = await fetchQuery(api.books.getBySlug, { slug: params.slug })
+  return <BookDetails book={book} />
+}
+```
+
+### Real-Time Client Components
+For dynamic sections, use Convex React hooks:
+
+```typescript
+'use client'
+import { useQuery, useMutation } from 'convex/react'
+
+function MyComponent() {
+  const data = useQuery(api.books.list)
+  const addBook = useMutation(api.books.create)
+}
+```
+
+### Scraping Pipeline
+Book data is scraped using Convex actions with scheduled functions for orchestration:
+- Actions call external APIs (Firecrawl, etc.)
+- `scheduler.runAfter()` chains pipeline steps
+- Status tracking on each entity (pending/complete/error)
+
+### Image Storage
+Book covers are stored in Convex File Storage, served via `next/image` for optimization.
+
+## Code Style
+
+- No semicolons
+- Single quotes for strings
+- Prefer `const` over `let`
+- Full variable names (no abbreviations like `ctx` or `cfg`)
+- Whitespace between logical blocks in functions
+- TypeScript strict mode
+
+## Project Structure
+
+```
+app/                    # Next.js App Router pages
+components/
+  ui/                   # shadcn/ui components
+convex/
+  schema.ts             # Database schema
+  books.ts              # Book queries/mutations
+  scraping/             # Scraping pipeline
+    adapters/           # Different scraping sources
+lib/
+  utils.ts              # Shared utilities (cn, etc.)
+```
+
+## Convex Patterns
+
+### Queries (read data)
+```typescript
+export const list = query({
+  handler: async (context) => {
+    return await context.db.query('books').collect()
+  },
+})
+```
+
+### Mutations (write data, can be internal)
+```typescript
+export const create = internalMutation({
+  args: { title: v.string() },
+  handler: async (context, args) => {
+    return await context.db.insert('books', args)
+  },
+})
+```
+
+### Actions (external calls, can schedule work)
+```typescript
+export const crawlBook = action({
+  args: { url: v.string() },
+  handler: async (context, args) => {
+    // Call external API
+    // Schedule follow-up work
+    await context.scheduler.runAfter(0, internal.scraping.downloadCover, { ... })
+  },
+})
+```
+
+## Database Tables
+
+- `books` - Core book data with cover images
+- `authors` - Author information
+- `series` - Book series
+- `awards` - Award definitions
+- `bookAwards` - Many-to-many book/award relationships
+
+## When Making Changes
+
+1. Keep ISR in mind - most public pages should be statically generated
+2. Use shadcn/ui components from `@/components/ui`
+3. Convex functions go in `convex/` directory
+4. Internal functions use `internalMutation`, `internalAction`, `internalQuery`
+5. Public functions use `mutation`, `action`, `query`
