@@ -1,0 +1,234 @@
+---
+description: Convex-specific patterns, best practices, and conventions
+globs: ["convex/**/*.ts"]
+alwaysApply: true
+---
+
+# Convex Patterns & Best Practices
+
+## Function Syntax
+
+Always use the **new function syntax** with `args`, `handler`, and optionally `returns` as object properties:
+
+```typescript
+// ✅ GOOD: New syntax
+export const getBook = query({
+  args: { id: v.id('books') },
+  handler: async (context, args) => {
+    return await context.db.get(args.id)
+  },
+})
+
+// ❌ BAD: Old syntax
+export const getBook = query(async (context, args) => {
+  return await context.db.get(args.id)
+})
+```
+
+## Validators
+
+- **Always specify `args` validator** - every function must validate its arguments
+- **Always specify `returns` validator** when returning data (use `v.null()` if returning nothing)
+- Use appropriate validators: `v.string()`, `v.number()`, `v.id('tableName')`, `v.array(...)`, `v.optional(...)`, `v.union(...)`, `v.object({...})`
+
+```typescript
+// ✅ GOOD: Explicit validators
+export const create = mutation({
+  args: {
+    title: v.string(),
+    authors: v.array(v.string()),
+    isbn: v.optional(v.string()),
+  },
+  returns: v.id('books'),
+  handler: async (context, args) => {
+    return await context.db.insert('books', args)
+  },
+})
+
+// ❌ BAD: Missing validators
+export const create = mutation({
+  handler: async (context, args: any) => {
+    return await context.db.insert('books', args)
+  },
+})
+```
+
+## Function Types
+
+### Public Functions (exposed to clients)
+- `query` - Read-only, reactive, can be called from client
+- `mutation` - Write operations, can be called from client
+- `action` - External calls, async operations, can be called from client
+
+### Internal Functions (only callable from other Convex functions)
+- `internalQuery` - Read-only, called via `context.runQuery()`
+- `internalMutation` - Write operations, called via `context.runMutation()`
+- `internalAction` - External calls, called via `context.runAction()`
+
+**Rule**: If a function is only used internally (e.g., called from actions or other mutations), use `internal*` variants.
+
+## Database Queries
+
+### Prefer Indexes Over Filters
+
+```typescript
+// ✅ GOOD: Using index
+const book = await context.db
+  .query('books')
+  .withIndex('by_asin', (q) => q.eq('asin', args.asin))
+  .unique()
+
+// ❌ BAD: Using filter (slower)
+const book = await context.db
+  .query('books')
+  .filter((q) => q.eq(q.field('asin'), args.asin))
+  .unique()
+```
+
+### Pagination
+
+Use `paginate()` with `paginationOptsValidator` for large result sets:
+
+```typescript
+import { paginationOptsValidator } from 'convex/server'
+
+export const listPaginated = query({
+  args: {
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (context, args) => {
+    return await context.db
+      .query('books')
+      .order('desc')
+      .paginate(args.paginationOpts)
+  },
+})
+```
+
+## Actions
+
+### Node.js Built-ins
+
+If using Node.js built-ins (like `fs`, `http`, `crypto`), add `"use node";` at the top:
+
+```typescript
+"use node"
+
+import { action } from '../_generated/server'
+import { v } from 'convex/values'
+
+export const fetchExternalData = action({
+  args: { url: v.string() },
+  handler: async (context, args) => {
+    // Can use Node.js built-ins here
+  },
+})
+```
+
+### Don't Use context.db in Actions
+
+Actions cannot directly access the database. Use `context.runQuery()` or `context.runMutation()`:
+
+```typescript
+// ✅ GOOD: Using runMutation
+export const crawlBook = action({
+  args: { url: v.string() },
+  handler: async (context, args) => {
+    const bookId = await context.runMutation(internal.books.create, {
+      title: '...',
+    })
+  },
+})
+
+// ❌ BAD: Direct db access in action
+export const crawlBook = action({
+  handler: async (context, args) => {
+    const bookId = await context.db.insert('books', {...}) // ERROR!
+  },
+})
+```
+
+### Scheduling Work
+
+Use `context.scheduler.runAfter()` or `context.scheduler.runAt()` to chain async operations:
+
+```typescript
+export const crawlBook = action({
+  handler: async (context, args) => {
+    // Schedule follow-up work
+    await context.scheduler.runAfter(0, internal.scraping.downloadCover, {
+      bookId,
+      imageUrl: args.coverUrl,
+    })
+  },
+})
+```
+
+## Schema & Indexes
+
+- Define indexes in `schema.ts` using `.index('indexName', ['field1', 'field2'])`
+- Use descriptive index names: `by_asin`, `by_status`, `by_author_id`
+- Indexes enable efficient queries - always use them for filtered queries
+
+## File Storage
+
+- Use `context.storage.getUrl(storageId)` to get public URLs for stored files
+- Store file IDs in your schema: `coverStorageId: v.optional(v.id('_storage'))`
+- Always check if storageId exists before calling `getUrl()`
+
+## Error Handling
+
+- Throw errors for exceptional cases
+- Use `v.optional()` for fields that might not exist
+- Return `null` from queries when entity not found (don't throw)
+
+```typescript
+export const get = query({
+  args: { id: v.id('books') },
+  handler: async (context, args) => {
+    const book = await context.db.get(args.id)
+    if (!book) return null // ✅ Return null, don't throw
+    return book
+  },
+})
+```
+
+## Type Safety
+
+- Import types from `../_generated/dataModel` for table IDs: `Id<'books'>`
+- Import `internal` from `../_generated/api` for internal function references
+- Import `api` from `../_generated/api` for public function references
+
+## Common Patterns
+
+### Upsert Pattern
+
+```typescript
+export const upsert = internalMutation({
+  args: { asin: v.string(), title: v.string() },
+  handler: async (context, args) => {
+    const existing = await context.db
+      .query('books')
+      .withIndex('by_asin', (q) => q.eq('asin', args.asin))
+      .unique()
+
+    if (existing) {
+      return await context.db.patch(existing._id, { title: args.title })
+    }
+    return await context.db.insert('books', args)
+  },
+})
+```
+
+### Resolving File URLs
+
+```typescript
+const booksWithUrls = await Promise.all(
+  books.map(async (book) => {
+    const coverUrl = book.coverStorageId
+      ? await context.storage.getUrl(book.coverStorageId)
+      : null
+    return { ...book, coverUrl }
+  }),
+)
+```
