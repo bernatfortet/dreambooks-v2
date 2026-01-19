@@ -10,6 +10,8 @@ const scrapedBookDataValidator = v.object({
   title: v.string(),
   subtitle: v.optional(v.string()),
   authors: v.array(v.string()),
+  // Amazon author IDs extracted from byline links - used for linking to authors table
+  amazonAuthorIds: v.optional(v.array(v.string())),
   isbn10: v.optional(v.string()),
   isbn13: v.optional(v.string()),
   asin: v.optional(v.string()),
@@ -25,6 +27,16 @@ const scrapedBookDataValidator = v.object({
   seriesName: v.optional(v.string()),
   seriesUrl: v.optional(v.string()),
   seriesPosition: v.optional(v.number()),
+  // Available formats (hardcover, paperback, kindle, audiobook, etc.)
+  formats: v.optional(
+    v.array(
+      v.object({
+        type: v.string(),
+        asin: v.string(),
+        amazonUrl: v.string(),
+      })
+    )
+  ),
 })
 
 /**
@@ -49,21 +61,12 @@ export const importFromLocalScrape = action({
 
     console.log('🏁 Importing book from local scrape', { title: args.scrapedData.title })
 
-    // Check if book already exists (for return value)
-    let existingBookId: Id<'books'> | null = null
-
-    if (args.scrapedData.asin) {
-      const existing = await context.runQuery(internal.books.queries.findByAsin, {
-        asin: args.scrapedData.asin,
-      })
-      existingBookId = existing?._id ?? null
-    }
-
-    // Upsert the book
-    const bookId = await context.runMutation(internal.books.mutations.upsertFromScrape, {
+    // Create or update book using unified mutation
+    const result = await context.runMutation(internal.books.internal.createOrUpdate, {
       title: args.scrapedData.title,
       subtitle: args.scrapedData.subtitle,
       authors: args.scrapedData.authors,
+      amazonAuthorIds: args.scrapedData.amazonAuthorIds,
       isbn10: args.scrapedData.isbn10,
       isbn13: args.scrapedData.isbn13,
       asin: args.scrapedData.asin,
@@ -79,22 +82,27 @@ export const importFromLocalScrape = action({
       lexileScore: args.scrapedData.lexileScore,
       ageRange: args.scrapedData.ageRange,
       gradeLevel: args.scrapedData.gradeLevel,
+      formats: args.scrapedData.formats,
       source: 'playwright-local',
-      scrapeStatus: 'complete',
+      detailsStatus: 'complete',
       coverStatus: args.scrapedData.coverImageUrl ? 'pending' : 'error',
-      scrapedAt: Date.now(),
     })
 
-    const isNew = existingBookId === null
+    const { bookId, isNew } = result
 
     console.log('✅ Book imported', { bookId, isNew, title: args.scrapedData.title })
 
-    // Schedule cover download if we have a URL
+    // Schedule cover download if we have a URL and book doesn't already have a cover
     if (args.scrapedData.coverImageUrl) {
-      await context.scheduler.runAfter(0, internal.scraping.downloadCover.downloadCover, {
-        bookId,
-        sourceUrl: args.scrapedData.coverImageUrl,
-      })
+      // For new books, always download. For existing books, check if cover is needed
+      const needsCover = isNew || await context.runQuery(internal.books.queries.needsCoverDownload, { bookId })
+
+      if (needsCover) {
+        await context.scheduler.runAfter(0, internal.scraping.downloadCover.downloadCover, {
+          bookId,
+          sourceUrl: args.scrapedData.coverImageUrl,
+        })
+      }
     }
 
     // If book has series info, upsert series and link

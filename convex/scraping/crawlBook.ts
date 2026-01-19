@@ -74,7 +74,7 @@ export const crawlBook = action({
         ageRange: bookData.ageRange ?? undefined,
         gradeLevel: bookData.gradeLevel ?? undefined,
         source: adapter,
-        scrapeStatus: 'complete',
+        detailsStatus: 'complete',
         coverStatus: bookData.coverImageUrl ? 'pending' : 'error',
         scrapedAt: Date.now(),
       })

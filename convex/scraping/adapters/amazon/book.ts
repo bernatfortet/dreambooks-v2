@@ -22,10 +22,12 @@ export const crawlBookWithAmazon = internalAction({
     }
 
     // Normalize undefined to null for consistency
+    // Note: Firecrawl extraction can't get amazonAuthorIds or formats from links
     const data: BookData = {
       title: result.data.title ?? null,
       subtitle: result.data.subtitle ?? null,
       authors: result.data.authors ?? [],
+      amazonAuthorIds: [], // Firecrawl can't extract this from links
       isbn10: result.data.isbn10 ?? null,
       isbn13: result.data.isbn13 ?? null,
       asin: result.data.asin ?? null,
@@ -40,6 +42,7 @@ export const crawlBookWithAmazon = internalAction({
       seriesName: result.data.seriesName ?? null,
       seriesUrl: result.data.seriesUrl ?? null,
       seriesPosition: result.data.seriesPosition ?? null,
+      formats: [], // Firecrawl can't extract format options
     }
 
     console.log('✅ Amazon book extraction complete', {

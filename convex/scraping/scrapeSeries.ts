@@ -1,8 +1,10 @@
 import { action } from '../_generated/server'
-import { api, internal } from '../_generated/api'
+import { internal } from '../_generated/api'
 import { v } from 'convex/values'
-import { Id } from '../_generated/dataModel'
-import { extractAsin, normalizeAmazonUrl } from './adapters/amazon/url'
+import { extractAsin } from './adapters/amazon/url'
+
+// Note: scrapeDiscovery action has been removed.
+// Book scraping is now handled via the unified scrapeQueue system.
 
 /**
  * Scrape a series page and create discoveries for found books.
@@ -68,20 +70,17 @@ export const scrapeSeries = action({
 
       for (const book of data.books) {
         const asin = book.asin ?? extractAsin(book.amazonUrl)
-        const normalizedUrl = normalizeAmazonUrl(book.amazonUrl)
 
         // Check if book already exists in DB by ASIN
         let existingBook = null
         if (asin) {
-          const books = await context.runQuery(internal.books.queries.findByAsin, { asin })
-          existingBook = books
+          existingBook = await context.runQuery(internal.books.queries.findByAsin, { asin })
         }
 
-        const status = existingBook ? 'skipped' : 'pending'
-        if (status === 'skipped') {
+        if (existingBook) {
           skippedCount++
           // Link existing book to series if not already linked
-          if (existingBook && !existingBook.seriesId) {
+          if (!existingBook.seriesId) {
             await context.runMutation(internal.series.mutations.linkBook, {
               bookId: existingBook._id,
               seriesId: args.seriesId,
@@ -91,19 +90,7 @@ export const scrapeSeries = action({
         } else {
           pendingCount++
         }
-
-        // Create discovery record
-        await context.runMutation(internal.series.mutations.createDiscovery, {
-          seriesId: args.seriesId,
-          source: 'amazon',
-          sourceUrl: book.amazonUrl,
-          sourceId: asin ?? undefined,
-          normalizedUrl,
-          title: book.title,
-          position: book.position,
-          status,
-          bookId: existingBook?._id,
-        })
+        // Note: Book scraping is now handled via scrapeQueue (unified discovery system)
       }
 
       console.log('✅ Series scrape complete', {
@@ -156,66 +143,6 @@ export const scrapeSeries = action({
       // Fail the scrape run
       await context.runMutation(internal.series.mutations.failScrapeRun, {
         runId,
-        errorMessage: error instanceof Error ? error.message : 'Unknown error',
-      })
-
-      throw error
-    }
-  },
-})
-
-/**
- * Scrape a single discovered book and link it to the series.
- */
-export const scrapeDiscovery = action({
-  args: {
-    discoveryId: v.id('seriesBookDiscoveries'),
-  },
-  handler: async (context, args): Promise<{ bookId: Id<'books'> }> => {
-    console.log('🏁 Scraping discovery', { discoveryId: args.discoveryId })
-
-    // Get discovery
-    const discovery = await context.runQuery(internal.series.queries.getDiscovery, {
-      id: args.discoveryId,
-    })
-
-    if (!discovery) {
-      throw new Error('Discovery not found')
-    }
-
-    if (discovery.status !== 'pending') {
-      throw new Error(`Discovery already processed: ${discovery.status}`)
-    }
-
-    try {
-      // Scrape the book using existing crawlBook action
-      const bookId = await context.runAction(api.scraping.crawlBook.crawlBook, {
-        url: discovery.sourceUrl,
-      })
-
-      // Link book to series
-      await context.runMutation(internal.series.mutations.linkBook, {
-        bookId,
-        seriesId: discovery.seriesId,
-        seriesPosition: discovery.position,
-      })
-
-      // Update discovery
-      await context.runMutation(internal.series.mutations.updateDiscovery, {
-        discoveryId: args.discoveryId,
-        status: 'complete',
-        bookId,
-      })
-
-      console.log('✅ Discovery scraped', { discoveryId: args.discoveryId, bookId })
-
-      return { bookId }
-    } catch (error) {
-      console.log('🚨 Discovery scrape failed', { discoveryId: args.discoveryId, error })
-
-      await context.runMutation(internal.series.mutations.updateDiscovery, {
-        discoveryId: args.discoveryId,
-        status: 'error',
         errorMessage: error instanceof Error ? error.message : 'Unknown error',
       })
 
