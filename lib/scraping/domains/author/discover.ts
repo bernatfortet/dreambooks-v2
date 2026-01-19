@@ -1,0 +1,44 @@
+import type { AuthorData } from './types'
+import type { Discovery } from '../../types'
+
+/**
+ * Extract discoveries from parsed author data.
+ * Returns links to series and books discovered from the author page.
+ */
+export function discoverAuthorLinks(data: AuthorData): Discovery[] {
+  const discoveries: Discovery[] = []
+
+  // Series discoveries
+  // Cap to prevent queue floods (max 20 series per author scrape)
+  const cappedSeries = data.series.slice(0, 20)
+
+  for (const series of cappedSeries) {
+    if (series.amazonUrl) {
+      discoveries.push({
+        type: 'series',
+        url: series.amazonUrl,
+        metadata: { name: series.name ?? undefined },
+        priority: 25,
+        source: 'author-page',
+      })
+    }
+  }
+
+  // Book discoveries
+  // Cap to prevent queue floods (max 30 books per author scrape)
+  const cappedBooks = data.books.slice(0, 30)
+
+  for (const book of cappedBooks) {
+    if (book.amazonUrl) {
+      discoveries.push({
+        type: 'book',
+        url: book.amazonUrl,
+        metadata: { name: book.title ?? undefined },
+        priority: 35,
+        source: 'author-page',
+      })
+    }
+  }
+
+  return discoveries
+}

@@ -60,7 +60,7 @@ export async function navigateWithRetry(params: {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       console.log(`🌀 Navigating to ${url} (attempt ${attempt}/${maxRetries})...`)
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 })
 
       // Wait for page to stabilize
       await page.waitForTimeout(waitMs)

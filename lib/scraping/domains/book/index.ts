@@ -1,4 +1,4 @@
 export { scrapeBook, extractAsinFromUrl } from './scrape'
-export { parseBookFromPage } from './parse'
-export type { BookData } from './types'
-export { bookExtractionSchema, bookExtractionPrompt } from './types'
+export { parseBookFromPage, ensurePreferredFormat } from './parse'
+export type { BookData, BookFormat } from './types'
+export { bookExtractionSchema, bookExtractionPrompt, FORMAT_PRIORITY } from './types'

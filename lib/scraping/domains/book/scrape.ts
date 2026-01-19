@@ -3,6 +3,7 @@ import { withBrowser, navigateWithRetry } from '../../providers/playwright'
 import { extract } from '../../providers/firecrawl'
 import { BookData, bookExtractionSchema, bookExtractionPrompt } from './types'
 import { parseBookFromPage } from './parse'
+import { extractAsinFromUrl } from '../../utils/amazon-url'
 
 const DEFAULT_PROVIDER: Provider = 'playwright'
 
@@ -48,10 +49,12 @@ async function scrapeBookWithFirecrawl(url: string): Promise<ScrapeResult<BookDa
   if (!result.success) return result
 
   // Normalize the response to match BookData (Firecrawl may return undefined vs null)
+  // Note: Firecrawl extraction can't get amazonAuthorIds or formats from links
   const normalized: BookData = {
     title: result.data.title ?? null,
     subtitle: result.data.subtitle ?? null,
     authors: result.data.authors ?? [],
+    amazonAuthorIds: [], // Firecrawl can't extract this from links
     isbn10: result.data.isbn10 ?? null,
     isbn13: result.data.isbn13 ?? null,
     asin: result.data.asin ?? null,
@@ -66,26 +69,11 @@ async function scrapeBookWithFirecrawl(url: string): Promise<ScrapeResult<BookDa
     seriesName: result.data.seriesName ?? null,
     seriesUrl: result.data.seriesUrl ?? null,
     seriesPosition: result.data.seriesPosition ?? null,
+    formats: [], // Firecrawl can't extract format options
   }
 
   return { success: true, data: normalized }
 }
 
-// --- URL utilities ---
-
-export function extractAsinFromUrl(url: string): string | null {
-  if (!url) return null
-
-  const match = url.match(/\/(?:dp|gp\/product|series)\/([A-Z0-9]{10})/)
-  if (match?.[1]) return match[1]
-
-  try {
-    const urlObj = new URL(url)
-    const asinParam = urlObj.searchParams.get('asin')
-    if (asinParam && /^[A-Z0-9]{10}$/.test(asinParam)) return asinParam
-  } catch {
-    // Invalid URL
-  }
-
-  return null
-}
+// Re-export for backward compatibility
+export { extractAsinFromUrl } from '../../utils/amazon-url'

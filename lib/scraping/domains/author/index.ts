@@ -1,5 +1,2 @@
-export type { AuthorData, AuthorBookEntry } from './types'
-
-// TODO: Implement scrapeAuthor and parseAuthorFromPage
-// export { scrapeAuthor } from './scrape'
-// export { parseAuthorFromPage } from './parse'
+export type { AuthorData, AuthorBookEntry, AuthorSeriesEntry } from './types'
+export { parseAuthorFromPage } from './parse'

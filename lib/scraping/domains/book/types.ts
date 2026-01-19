@@ -1,7 +1,24 @@
+// Format priority: higher number = more preferred
+export const FORMAT_PRIORITY: Record<string, number> = {
+  hardcover: 4,
+  paperback: 3,
+  kindle: 2,
+  audiobook: 1,
+  unknown: 0,
+}
+
+export type BookFormat = {
+  type: string // 'hardcover', 'paperback', 'kindle', 'audiobook', etc.
+  asin: string
+  amazonUrl: string
+}
+
 export type BookData = {
   title: string | null
   subtitle: string | null
   authors: string[]
+  // Amazon author IDs extracted from byline links - used for linking to authors table
+  amazonAuthorIds: string[]
   isbn10: string | null
   isbn13: string | null
   asin: string | null
@@ -17,6 +34,8 @@ export type BookData = {
   seriesName: string | null
   seriesUrl: string | null
   seriesPosition: number | null
+  // Available formats
+  formats: BookFormat[]
 }
 
 // Firecrawl extraction schema (JSON Schema format)
