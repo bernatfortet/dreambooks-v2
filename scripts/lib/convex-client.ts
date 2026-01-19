@@ -42,6 +42,7 @@ export async function importBookToConvex(params: {
     title: scrapedData.title,
     subtitle: scrapedData.subtitle ?? undefined,
     authors: scrapedData.authors,
+    amazonAuthorIds: scrapedData.amazonAuthorIds?.length ? scrapedData.amazonAuthorIds : undefined,
     isbn10: scrapedData.isbn10 ?? undefined,
     isbn13: scrapedData.isbn13 ?? undefined,
     asin: scrapedData.asin ?? undefined,
@@ -57,6 +58,7 @@ export async function importBookToConvex(params: {
     seriesName: scrapedData.seriesName ?? undefined,
     seriesUrl: scrapedData.seriesUrl ?? undefined,
     seriesPosition: scrapedData.seriesPosition ?? undefined,
+    formats: scrapedData.formats?.length ? scrapedData.formats : undefined,
   }
 
   const result = await client.action(api.scraping.importBook.importFromLocalScrape, {

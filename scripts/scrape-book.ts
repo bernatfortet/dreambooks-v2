@@ -1,12 +1,13 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env bunx tsx
 
 /**
  * Local Amazon book scraper using Playwright with stealth mode.
  *
  * Usage:
- *   npx tsx scripts/scrape-book.ts "https://www.amazon.com/dp/B07T8WRV2M"
- *   npx tsx scripts/scrape-book.ts "https://www.amazon.com/dp/B07T8WRV2M" --dry-run
- *   npx tsx scripts/scrape-book.ts "https://www.amazon.com/dp/B07T8WRV2M" --headless=false
+ *   bunx tsx scripts/scrape-book.ts "https://www.amazon.com/dp/B07T8WRV2M"
+ *   bunx tsx scripts/scrape-book.ts "https://www.amazon.com/gp/product/1250219957"
+ *   bunx tsx scripts/scrape-book.ts "https://www.amazon.com/dp/B07T8WRV2M" --dry-run
+ *   bunx tsx scripts/scrape-book.ts "https://www.amazon.com/dp/B07T8WRV2M" --headless=false
  *
  * Environment variables:
  *   CONVEX_URL - Convex deployment URL (required unless --dry-run)
@@ -17,8 +18,12 @@ import * as dotenv from 'dotenv'
 import { writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 
-import { scrapeBook, extractAsinFromUrl, BookData } from '../lib/scraping'
+import { scrapeBook, BookData } from '../lib/scraping'
+import { scrapeSeries } from '../lib/scraping/domains/series'
 import { importBookToConvex } from './lib/convex-client'
+import { ConvexHttpClient } from 'convex/browser'
+import { api } from '../convex/_generated/api'
+import type { Id } from '../convex/_generated/dataModel'
 
 // Load environment variables (.env.local takes precedence over .env)
 dotenv.config({ path: '.env.local' })
@@ -39,14 +44,11 @@ async function main() {
   console.log(`   Headless: ${args.headless}`)
   console.log('')
 
-  // Validate URL
-  const asin = extractAsinFromUrl(args.url)
-  if (!asin) {
-    console.error('🚨 Invalid Amazon URL. Expected format: https://www.amazon.com/dp/ASIN')
+  // Validate URL (accept /dp/ and /gp/product/ formats)
+  if (!isAmazonUrl(args.url)) {
+    console.error('🚨 Invalid URL. Expected an Amazon product URL.')
     process.exit(1)
   }
-
-  console.log(`🔍 Detected ASIN: ${asin}`)
 
   // Scrape the page using the centralized scraping library
   const scrapeResult = await scrapeBook(args.url, {
@@ -82,20 +84,25 @@ async function main() {
   printBookData(bookData)
   console.log('─'.repeat(50))
 
+  const outputFileNameBase = getOutputFileNameBase({ url: args.url, bookData })
+
   // Dry run - just output the data
   if (args.dryRun) {
     console.log('')
     console.log('🏁 Dry run complete. No data saved.')
-    await saveOutput(asin, bookData)
+    await saveOutput(outputFileNameBase, bookData)
     return
   }
 
   // Import to Convex
+  let bookId: string | null = null
   try {
     const result = await importBookToConvex({
       scrapedData: bookData,
       amazonUrl: args.url,
     })
+
+    bookId = result.bookId
 
     console.log('')
     console.log('✅ Book imported successfully!')
@@ -106,6 +113,139 @@ async function main() {
     console.error('🚨 Failed to import to Convex:', message)
     await logFailedUrl(args.url, message)
     process.exit(1)
+  }
+
+  // Chain series scraping if book has series info
+  if (bookData.seriesUrl && bookData.seriesName && bookId) {
+    console.log('')
+    console.log('🔗 Book is part of a series, scraping series page...')
+    console.log(`   Series: ${bookData.seriesName}`)
+    console.log(`   Series URL: ${bookData.seriesUrl}`)
+    console.log('')
+
+    try {
+      await scrapeSeriesFromBook({
+        seriesUrl: bookData.seriesUrl,
+        seriesName: bookData.seriesName,
+        bookId,
+        headless: args.headless,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.error('⚠️ Series scraping failed:', message)
+      console.log('   (Book was imported successfully, but series scraping failed)')
+    }
+  }
+}
+
+async function scrapeSeriesFromBook(params: {
+  seriesUrl: string
+  seriesName: string
+  bookId: string
+  headless: boolean
+}) {
+  const { seriesUrl, seriesName, bookId, headless } = params
+
+  const convexUrl = process.env.CONVEX_URL
+  if (!convexUrl) {
+    throw new Error('CONVEX_URL environment variable is not set')
+  }
+
+  const client = new ConvexHttpClient(convexUrl)
+
+  // Get the book to find its seriesId
+  const book = await client.query(api.books.queries.get, { id: bookId as Id<'books'> })
+  if (!book) {
+    throw new Error('Book not found after import')
+  }
+
+  // Get or create series ID
+  let seriesId: Id<'series'> | null = book.seriesId ?? null
+
+  if (!seriesId) {
+    // Series should have been created during import, but if not, create it now
+    seriesId = await client.mutation(api.series.mutations.upsertFromUrl, {
+      name: seriesName,
+      sourceUrl: seriesUrl,
+    })
+
+    // Link book to series if not already linked
+    if (!book.seriesId) {
+      await client.mutation(api.series.mutations.linkBookToSeries, {
+        bookId: bookId as Id<'books'>,
+        seriesId,
+      })
+    }
+  }
+
+  console.log(`🌀 Scraping series with Playwright...`)
+  console.log(`   Series ID: ${seriesId}`)
+  console.log('')
+
+  const startTime = Date.now()
+  const result = await scrapeSeries(seriesUrl, { headless })
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
+
+  if (!result.success) {
+    throw new Error(result.error ?? 'Series scraping failed')
+  }
+
+  const { data } = result
+
+  console.log('')
+  console.log('✅ Series scrape complete in', elapsed, 'seconds')
+  console.log('  Series name:', data.name)
+  console.log('  Total books:', data.totalBooks ?? 'unknown')
+  console.log('  Books found:', data.books.length)
+  console.log('')
+  console.log('📚 Books discovered:')
+
+  for (const book of data.books) {
+    const formatLabel = book.format !== 'unknown' ? ` [${book.format}]` : ''
+    const authorsLabel = book.authors && book.authors.length > 0 ? ` by ${book.authors.join(', ')}` : ''
+    console.log(`  #${book.position ?? '?'}: ${book.title}${authorsLabel}${formatLabel} (${book.asin ?? 'no ASIN'})`)
+  }
+
+  console.log('')
+  console.log('💾 Saving to Convex via mutation...')
+
+  const saveResult = await client.mutation(api.series.mutations.saveFromCliScrape, {
+    seriesId,
+    seriesName: data.name ?? 'Unknown Series',
+    description: data.description ?? undefined,
+    coverImageUrl: data.coverImageUrl ?? undefined,
+    expectedBookCount: data.totalBooks ?? undefined,
+    books: data.books
+      .filter((book) => book.amazonUrl) // Only books with URLs
+      .map((book) => ({
+        title: book.title ?? 'Unknown Title',
+        amazonUrl: book.amazonUrl!,
+        asin: book.asin ?? undefined,
+        position: book.position ?? undefined,
+        coverImageUrl: book.coverImageUrl ?? undefined,
+        authors: book.authors && book.authors.length > 0 ? book.authors : undefined,
+      })),
+    pagination: data.pagination
+      ? {
+          currentPage: data.pagination.currentPage,
+          totalPages: data.pagination.totalPages ?? undefined,
+          nextPageUrl: data.pagination.nextPageUrl ?? undefined,
+        }
+      : undefined,
+  })
+
+  console.log('')
+  console.log('✅ Series scrape saved to Convex!')
+  console.log('  Books found:', saveResult.booksFound)
+  console.log('  Pending:', saveResult.pending)
+  console.log('  Skipped:', saveResult.skipped)
+  console.log('  Has more pages:', saveResult.hasMorePages)
+
+  if (saveResult.pending > 0) {
+    console.log('')
+    console.log('📋 Next steps:')
+    console.log('  Go to /ad/series/' + seriesId)
+    console.log('  Process pending discoveries (each uses Firecrawl for book details)')
   }
 }
 
@@ -135,7 +275,7 @@ function parseArgs(): CliArgs {
 
 function printUsage() {
   console.log(`
-Usage: npx tsx scripts/scrape-book.ts <amazon-url> [options]
+Usage: bunx tsx scripts/scrape-book.ts <amazon-url> [options]
 
 Options:
   --dry-run         Scrape but don't save to database
@@ -143,9 +283,10 @@ Options:
   --help, -h        Show this help message
 
 Examples:
-  npx tsx scripts/scrape-book.ts "https://www.amazon.com/dp/B07T8WRV2M"
-  npx tsx scripts/scrape-book.ts "https://www.amazon.com/dp/B07T8WRV2M" --dry-run
-  npx tsx scripts/scrape-book.ts "https://www.amazon.com/dp/B07T8WRV2M" --headless=false
+  bunx tsx scripts/scrape-book.ts "https://www.amazon.com/dp/B07T8WRV2M"
+  bunx tsx scripts/scrape-book.ts "https://www.amazon.com/gp/product/1250219957"
+  bunx tsx scripts/scrape-book.ts "https://www.amazon.com/dp/B07T8WRV2M" --dry-run
+  bunx tsx scripts/scrape-book.ts "https://www.amazon.com/dp/B07T8WRV2M" --headless=false
 
 Environment variables:
   CONVEX_URL         - Your Convex deployment URL
@@ -182,9 +323,9 @@ function printBookData(data: BookData) {
   }
 }
 
-async function saveOutput(asin: string, data: BookData) {
+async function saveOutput(outputFileNameBase: string, data: BookData) {
   const outputDir = join(process.cwd(), 'scripts', 'output')
-  const outputFile = join(outputDir, `${asin}.json`)
+  const outputFile = join(outputDir, `${outputFileNameBase}.json`)
 
   try {
     await mkdir(outputDir, { recursive: true })
@@ -193,6 +334,47 @@ async function saveOutput(asin: string, data: BookData) {
   } catch (error) {
     console.warn('⚠️ Failed to save output file:', error)
   }
+}
+
+function getOutputFileNameBase(params: { url: string; bookData: BookData }): string {
+  const { url, bookData } = params
+
+  const fromData = bookData.asin ?? bookData.isbn13 ?? bookData.isbn10
+  if (fromData) return sanitizeFileName(fromData)
+
+  const fromUrl = extractAmazonProductIdFromUrl(url)
+  if (fromUrl) return sanitizeFileName(fromUrl)
+
+  return 'book'
+}
+
+function extractAmazonProductIdFromUrl(url: string): string | null {
+  const patterns = [
+    /\/dp\/([A-Z0-9]{10})/i,
+    /\/gp\/product\/([A-Z0-9]{10})/i,
+    /\/product\/([A-Z0-9]{10})/i,
+  ]
+
+  for (const pattern of patterns) {
+    const match = url.match(pattern)
+    if (match?.[1]) return match[1]
+  }
+
+  return null
+}
+
+function isAmazonUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return parsed.hostname === 'www.amazon.com' || parsed.hostname.endsWith('.amazon.com')
+  } catch {
+    return false
+  }
+}
+
+function sanitizeFileName(value: string): string {
+  const sanitized = value.replace(/[^a-zA-Z0-9_-]/g, '-')
+  return sanitized || 'book'
 }
 
 async function logFailedUrl(url: string, error: string) {
