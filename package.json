@@ -5,6 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "con": "npx convex dev",
+    "google": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug-profile",
+    "check-chrome": "bunx tsx scripts/worker/check-chrome.ts",
+    "worker": "bunx tsx scripts/worker/index.ts",
     "dev:all": "concurrently \"npx convex dev\" \"bun run dev\" --names \"convex,next\" --prefix-colors \"cyan,magenta\"",
     "build": "next build",
     "start": "next start",
@@ -13,7 +16,9 @@
   "dependencies": {
     "@convex-dev/auth": "^0.0.90",
     "@mendable/firecrawl-js": "^4.10.0",
+    "@radix-ui/react-select": "^2.2.6",
     "@radix-ui/react-slot": "^1.2.4",
+    "@radix-ui/react-tabs": "^1.1.13",
     "cheerio": "^1.1.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
