@@ -35,81 +35,60 @@ This skill guides you through adding a new book series to the Dreambooks databas
 ### Step 2: Check for Duplicates
 
 Before scraping, check if series already exists:
-- Query `internal.series.queries.getBySourceUrl` with the URL
+- Query `api.series.queries.getBySourceUrl` with the URL
 - If exists, ask user if they want to rescrape/refresh
 
-### Step 3: Create or Get Series Record
+### Step 3: Add to Scrape Queue
 
-If new series:
+The easiest way is to add the series URL to the scrape queue:
 
 ```typescript
-const seriesId = await context.runMutation(internal.series.mutations.upsert, {
-  name: seriesName, // may be placeholder until scrape completes
-  source: 'amazon',
-  sourceUrl: amazonSeriesUrl,
+// Add to queue via mutation
+await context.mutation(api.scrapeQueue.mutations.enqueue, {
+  url: amazonSeriesUrl,
+  type: 'series',
+  source: 'user',
 })
 ```
 
-### Step 4: Scrape Series Data
+The local worker will then:
+1. Scrape the series page
+2. Create the series record
+3. Queue discovered books automatically (via unified discovery system)
+4. Process books with priority ordering
 
-Use the existing scrapeSeries action:
-
-```typescript
-await context.runAction(api.scraping.scrapeSeries.scrapeSeries, {
-  seriesId: seriesId,
-})
-```
-
-This action:
-1. Creates a `seriesScrapeRun` for traceability
-2. Calls Amazon adapter to extract series metadata
-3. Creates `seriesBookDiscoveries` for each book found
-4. Updates series with book counts and pagination info
-5. Handles multi-page series (pagination)
-
-### Step 5: Data Verification (TODO - v1)
+### Step 4: Data Verification (TODO - v1)
 
 Future enhancement: Use fast/cheap AI model to verify:
 - Series name is accurate and clean
 - Book count matches expectation
 - Description is appropriate
 
-### Step 6: Process Discovered Books (Optional)
-
-After series scrape, user may want to import the books:
-
-```typescript
-// Get pending discoveries
-const discoveries = await context.runQuery(internal.series.queries.getDiscoveriesByStatus, {
-  seriesId: seriesId,
-  status: 'pending',
-})
-
-// Scrape each discovered book
-for (const discovery of discoveries) {
-  await context.runAction(api.scraping.scrapeSeries.scrapeDiscovery, {
-    discoveryId: discovery._id,
-  })
-}
-```
-
-### Step 7: Confirmation
+### Step 5: Confirmation
 
 Report back to user:
-- Series name and description
-- Number of books discovered
-- How many are already in DB vs pending
-- Whether pagination exists (more pages to scrape)
+- Series URL added to queue
+- Worker will process and discover books automatically
+- Books will be queued with `source: 'discovery'`
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `convex/scraping/scrapeSeries.ts` | Main entry point - orchestrates series scraping |
-| `convex/scraping/adapters/amazon/series.ts` | Amazon-specific series extraction |
+| `convex/scrapeQueue/mutations.ts` | Queue mutations (enqueue, enqueueDiscoveries) |
+| `convex/scraping/scrapeSeries.ts` | Action for direct series scraping |
 | `convex/series/mutations.ts` | Database mutations for series |
-| `convex/series/queries.ts` | Queries for series and discoveries |
-| `lib/scraping/domains/series/types.ts` | SeriesData type definition |
+| `scripts/worker/processors/series.ts` | Worker processor for series URLs |
+| `lib/scraping/domains/series/discover.ts` | Book discovery extraction from series |
+
+## Unified Discovery System
+
+Books are now discovered via a unified queue system:
+
+1. When a series is scraped, `discoverSeriesLinks()` extracts book URLs
+2. Books are added to `scrapeQueue` with `source: 'discovery'`
+3. Worker processes queue items in priority order
+4. Books themselves may discover more series/authors
 
 ## Database Schema
 
@@ -122,12 +101,13 @@ Report back to user:
 - Pagination: `lastScrapedPage`, `totalPages`, `nextPageUrl`
 - Status: `scrapeStatus`, `lastScrapedAt`, `errorMessage`
 
-### Series Book Discoveries Table
+### Scrape Queue Table
 
-- Links: `seriesId`, `bookId` (after import)
-- Source: `source`, `sourceUrl`, `sourceId`, `normalizedUrl`
-- Display: `title`, `position`
-- Status: `status` (pending/complete/skipped/error)
+- `url`: The URL to scrape
+- `type`: 'book' | 'series' | 'author'
+- `source`: 'user' | 'discovery'
+- `status`: 'pending' | 'processing' | 'complete' | 'error'
+- `priority`: Lower = higher priority
 
 ## Series Scrape States
 
@@ -148,13 +128,12 @@ Common errors to handle:
 - Invalid URL format → Ask user to provide Amazon series URL
 - Series not found → URL may be incorrect
 - Partial scrape → Inform user, offer to continue pagination
-- Book scraping failures → Report which discoveries failed
+- Book scraping failures → Errors tracked in scrapeQueue
 
 ## Future Enhancements (v1+)
 
 - [ ] Search by series name
 - [ ] AI verification of series metadata
 - [ ] Automatic pagination handling
-- [ ] Batch import all discovered books
 - [ ] Series cover image download
 - [ ] Cross-reference with other sources
