@@ -3,6 +3,44 @@ import { v } from 'convex/values'
 
 export default defineSchema({
   // ===================
+  // SCRAPE QUEUE
+  // ===================
+
+  scrapeQueue: defineTable({
+    url: v.string(),
+    type: v.union(v.literal('book'), v.literal('series'), v.literal('author')),
+    status: v.union(
+      v.literal('pending'),
+      v.literal('processing'),
+      v.literal('complete'),
+      v.literal('error')
+    ),
+    priority: v.number(), // Lower = higher priority
+    // Preview info for admin UI
+    displayName: v.optional(v.string()), // Book title, series name, or author name
+    // Options
+    scrapeFullSeries: v.boolean(), // If book, also scrape its series and all books
+    // Source tracking (optional for backward compat, defaults to 'user' in code)
+    source: v.optional(v.union(v.literal('user'), v.literal('discovery'))),
+    // Lease fields for safe concurrent processing
+    leaseExpiresAt: v.optional(v.number()), // Timestamp when lease expires
+    workerId: v.optional(v.string()), // Which worker holds the lease
+    attemptCount: v.optional(v.number()), // For retry tracking
+    // Results
+    bookId: v.optional(v.id('books')),
+    seriesId: v.optional(v.id('series')),
+    authorId: v.optional(v.id('authors')),
+    errorMessage: v.optional(v.string()),
+    // Meta
+    createdAt: v.number(),
+    startedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+  })
+    .index('by_status', ['status'])
+    .index('by_status_priority', ['status', 'priority'])
+    .index('by_url', ['url']),
+
+  // ===================
   // BOOKS
   // ===================
 
@@ -33,12 +71,25 @@ export default defineSchema({
     title: v.string(),
     subtitle: v.optional(v.string()),
     authors: v.array(v.string()),
+    // Amazon author IDs extracted from byline links - used for linking to authors table
+    amazonAuthorIds: v.optional(v.array(v.string())),
 
     // Identifiers
     isbn10: v.optional(v.string()),
     isbn13: v.optional(v.string()),
     asin: v.optional(v.string()),
     amazonUrl: v.optional(v.string()),
+
+    // Available formats (extracted from "See all formats" section)
+    formats: v.optional(
+      v.array(
+        v.object({
+          type: v.string(), // 'hardcover', 'paperback', 'kindle', 'audiobook', etc.
+          asin: v.string(),
+          amazonUrl: v.string(),
+        })
+      )
+    ),
 
     // Series link (foreign key to series table)
     seriesId: v.optional(v.id('series')),
@@ -65,12 +116,27 @@ export default defineSchema({
 
     // Metadata
     source: v.string(), // 'amazon', 'openlibrary', etc.
-    scrapeStatus: v.union(v.literal('pending'), v.literal('complete'), v.literal('error')),
+    // MIGRATION NEEDED: Make detailsStatus required after backfilling existing records
+    // Steps: 1) Backfill all null values to 'complete' for existing books with full data
+    //        2) Remove v.optional wrapper
+    detailsStatus: v.optional(
+      v.union(
+        v.literal('basic'), // Created from series listing, not enriched
+        v.literal('queued'), // Queued for enrichment
+        v.literal('complete'), // Fully scraped
+        v.literal('error'), // Enrichment failed
+      ),
+    ),
+    // DEPRECATED: Old field name, use detailsStatus instead
+    // MIGRATION NEEDED: Remove after verifying no code references this field
+    scrapeStatus: v.optional(
+      v.union(v.literal('pending'), v.literal('complete'), v.literal('error')),
+    ),
     coverStatus: v.union(v.literal('pending'), v.literal('complete'), v.literal('error')),
     scrapedAt: v.number(),
     errorMessage: v.optional(v.string()),
   })
-    .index('by_scrapeStatus', ['scrapeStatus'])
+    .index('by_detailsStatus', ['detailsStatus'])
     .index('by_coverStatus', ['coverStatus'])
     .index('by_asin', ['asin'])
     .index('by_isbn13', ['isbn13'])
@@ -130,38 +196,8 @@ export default defineSchema({
     .index('by_scrapeStatus', ['scrapeStatus'])
     .index('by_name', ['name']),
 
-  seriesBookDiscoveries: defineTable({
-    seriesId: v.id('series'),
-
-    // Source-agnostic pointer
-    source: v.string(),
-    sourceUrl: v.string(),
-    sourceId: v.optional(v.string()), // asin if extractable
-    normalizedUrl: v.string(), // For deduplication
-
-    // Display (from series page)
-    title: v.optional(v.string()),
-    position: v.optional(v.number()),
-
-    // Status
-    status: v.union(
-      v.literal('pending'), // Discovered, not scraped
-      v.literal('complete'), // Successfully scraped and linked
-      v.literal('skipped'), // Already existed in DB
-      v.literal('error'),
-    ),
-    bookId: v.optional(v.id('books')),
-
-    // Meta
-    discoveredAt: v.number(),
-    scrapedAt: v.optional(v.number()),
-    errorMessage: v.optional(v.string()),
-  })
-    .index('by_seriesId', ['seriesId'])
-    .index('by_status', ['status'])
-    .index('by_normalizedUrl', ['normalizedUrl'])
-    .index('by_sourceId', ['sourceId'])
-    .index('by_seriesId_status', ['seriesId', 'status']),
+  // Note: seriesBookDiscoveries table has been removed.
+  // Book discoveries are now managed via the unified scrapeQueue system.
 
   seriesScrapeRuns: defineTable({
     seriesId: v.id('series'),
@@ -187,4 +223,51 @@ export default defineSchema({
       }),
     ),
   }).index('by_seriesId', ['seriesId']),
+
+  // ===================
+  // AUTHORS
+  // ===================
+
+  authors: defineTable({
+    // Identity
+    name: v.string(),
+    bio: v.optional(v.string()),
+
+    // Source - amazonAuthorId is the PRIMARY key for linking
+    source: v.string(), // 'amazon'
+    amazonAuthorId: v.string(), // e.g., 'B000APEZHY' - required, unique
+    sourceUrl: v.optional(v.string()),
+
+    // Image
+    imageStorageId: v.optional(v.id('_storage')),
+    imageSourceUrl: v.optional(v.string()),
+
+    // Status
+    scrapeStatus: v.union(
+      v.literal('pending'),
+      v.literal('complete'),
+      v.literal('error')
+    ),
+    lastScrapedAt: v.optional(v.number()),
+    errorMessage: v.optional(v.string()),
+
+    createdAt: v.number(),
+  })
+    .index('by_amazonAuthorId', ['amazonAuthorId'])
+    .index('by_name', ['name'])
+    .index('by_scrapeStatus', ['scrapeStatus']),
+
+  // Join table for book-author relationships (enables indexed "books by author" queries)
+  bookAuthors: defineTable({
+    bookId: v.id('books'),
+    authorId: v.id('authors'),
+
+    // How the link was established
+    source: v.string(), // 'amazonAuthorId' | 'nameMatch'
+
+    createdAt: v.number(),
+  })
+    .index('by_authorId', ['authorId']) // Critical: "all books by author X"
+    .index('by_bookId', ['bookId']) // "all authors of book Y"
+    .index('by_bookId_authorId', ['bookId', 'authorId']), // Uniqueness check
 })
