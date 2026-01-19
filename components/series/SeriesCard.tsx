@@ -2,11 +2,12 @@
 
 import { useState } from 'react'
 import Image from 'next/image'
-import { useQuery, useAction } from 'convex/react'
+import { useQuery, useMutation } from 'convex/react'
 import { api } from '@/convex/_generated/api'
 import { Id } from '@/convex/_generated/dataModel'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import Link from 'next/link'
 
@@ -16,10 +17,10 @@ type SeriesCardProps = {
 
 export function SeriesCard({ seriesId }: SeriesCardProps) {
   const series = useQuery(api.series.queries.getWithDiscoveries, { id: seriesId })
-  const scrapeSeries = useAction(api.scraping.scrapeSeries.scrapeSeries)
-  const scrapeDiscovery = useAction(api.scraping.scrapeSeries.scrapeDiscovery)
-  const [isScraping, setIsScraping] = useState(false)
-  const [scrapingDiscoveryId, setScrapingDiscoveryId] = useState<Id<'seriesBookDiscoveries'> | null>(null)
+  const updateSourceUrl = useMutation(api.series.mutations.updateSourceUrl)
+
+  const [sourceUrlInput, setSourceUrlInput] = useState('')
+  const [isSavingUrl, setIsSavingUrl] = useState(false)
 
   if (series === undefined) {
     return <p className="text-muted-foreground">Loading series...</p>
@@ -29,30 +30,19 @@ export function SeriesCard({ seriesId }: SeriesCardProps) {
     return <p className="text-muted-foreground">Series not found</p>
   }
 
-  async function handleScrapeSeries() {
-    setIsScraping(true)
+  async function handleSaveSourceUrl() {
+    if (!sourceUrlInput.trim()) return
+
+    setIsSavingUrl(true)
     try {
-      await scrapeSeries({ seriesId })
+      await updateSourceUrl({ seriesId, sourceUrl: sourceUrlInput.trim() })
+      setSourceUrlInput('')
     } catch (error) {
-      console.error('🚨 Failed to scrape series', error)
+      console.error('Failed to save source URL', error)
     } finally {
-      setIsScraping(false)
+      setIsSavingUrl(false)
     }
   }
-
-  async function handleScrapeDiscovery(discoveryId: Id<'seriesBookDiscoveries'>) {
-    setScrapingDiscoveryId(discoveryId)
-    try {
-      await scrapeDiscovery({ discoveryId })
-    } catch (error) {
-      console.error('🚨 Failed to scrape discovery', error)
-    } finally {
-      setScrapingDiscoveryId(null)
-    }
-  }
-
-  const pendingDiscoveries = series.discoveries.filter((d: typeof series.discoveries[number]) => d.status === 'pending')
-  const completedDiscoveries = series.discoveries.filter((d: typeof series.discoveries[number]) => d.status === 'complete' || d.status === 'skipped')
 
   return (
     <div className="space-y-6">
@@ -91,18 +81,16 @@ export function SeriesCard({ seriesId }: SeriesCardProps) {
             </div>
           )}
 
-          {series.sourceUrl && (
-            <div className="flex gap-2">
-              <Button
-                onClick={handleScrapeSeries}
-                disabled={isScraping || series.scrapeStatus === 'processing'}
-              >
-                {isScraping || series.scrapeStatus === 'processing'
-                  ? '🌀 Scraping...'
-                  : series.scrapeStatus === 'partial'
-                    ? '📚 Continue Scraping'
-                    : '📚 Scrape Amazon Series'}
-              </Button>
+          {series.sourceUrl ? (
+            <div className="space-y-3">
+              <div className="p-3 bg-muted rounded-md">
+                <p className="text-sm text-muted-foreground mb-2">
+                  Run this command locally to scrape the series:
+                </p>
+                <code className="text-xs bg-background px-2 py-1 rounded block overflow-x-auto">
+                  bun scripts/scrape-series.ts {seriesId}
+                </code>
+              </div>
 
               <a
                 href={series.sourceUrl}
@@ -113,6 +101,26 @@ export function SeriesCard({ seriesId }: SeriesCardProps) {
                 View on Amazon →
               </a>
             </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">
+                No Amazon series URL. Add one to enable scraping:
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="https://www.amazon.com/dp/..."
+                  value={sourceUrlInput}
+                  onChange={(event) => setSourceUrlInput(event.target.value)}
+                  className="flex-1"
+                />
+                <Button
+                  onClick={handleSaveSourceUrl}
+                  disabled={isSavingUrl || !sourceUrlInput.trim()}
+                >
+                  {isSavingUrl ? 'Saving...' : 'Save URL'}
+                </Button>
+              </div>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -120,17 +128,17 @@ export function SeriesCard({ seriesId }: SeriesCardProps) {
       {/* Scraped Books */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Scraped Books ({series.books.length})</CardTitle>
+          <CardTitle className="text-lg">Books in Series ({series.books.length})</CardTitle>
         </CardHeader>
         <CardContent>
           {series.books.length === 0 ? (
-            <p className="text-muted-foreground">No books scraped yet.</p>
+            <p className="text-muted-foreground">No books in this series yet.</p>
           ) : (
             <div className="space-y-3">
               {series.books.map((book: typeof series.books[number]) => (
                 <div key={book._id} className="flex items-center gap-4 p-2 border rounded">
                   {book.coverUrl && (
-                    <div className="relative w-12 h-16 flex-shrink-0">
+                    <div className="relative w-12 h-16 shrink-0">
                       <Image
                         src={book.coverUrl}
                         alt={book.title}
@@ -149,8 +157,8 @@ export function SeriesCard({ seriesId }: SeriesCardProps) {
                       {book.authors.join(', ')}
                     </p>
                   </div>
-                  <Badge variant={book.scrapeStatus === 'complete' ? 'default' : 'secondary'}>
-                    {book.scrapeStatus}
+                  <Badge variant={book.detailsStatus === 'complete' ? 'default' : 'secondary'}>
+                    {book.detailsStatus ?? 'unknown'}
                   </Badge>
                 </div>
               ))}
@@ -158,72 +166,6 @@ export function SeriesCard({ seriesId }: SeriesCardProps) {
           )}
         </CardContent>
       </Card>
-
-      {/* Pending Discoveries */}
-      {pendingDiscoveries.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Pending Discoveries ({pendingDiscoveries.length})</CardTitle>
-            <CardDescription>Books found in this series that haven't been scraped yet.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {pendingDiscoveries.map((discovery: typeof pendingDiscoveries[number]) => (
-                <div key={discovery._id} className="flex items-center gap-4 p-2 border rounded">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium truncate">
-                      {discovery.position && `#${discovery.position} `}
-                      {discovery.title ?? 'Unknown title'}
-                    </p>
-                    <a
-                      href={discovery.sourceUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-blue-500 hover:underline truncate block"
-                    >
-                      {discovery.sourceUrl.slice(0, 60)}...
-                    </a>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleScrapeDiscovery(discovery._id)}
-                    disabled={scrapingDiscoveryId === discovery._id}
-                  >
-                    {scrapingDiscoveryId === discovery._id ? '🌀' : '📖 Scrape'}
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Completed/Skipped Discoveries (collapsed) */}
-      {completedDiscoveries.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg text-muted-foreground">
-              Processed Discoveries ({completedDiscoveries.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-1 text-sm text-muted-foreground">
-              {completedDiscoveries.map((discovery: typeof completedDiscoveries[number]) => (
-                <div key={discovery._id} className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-xs">
-                    {discovery.status}
-                  </Badge>
-                  <span className="truncate">
-                    {discovery.position && `#${discovery.position} `}
-                    {discovery.title ?? discovery.sourceUrl.slice(0, 40)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
     </div>
   )
 }

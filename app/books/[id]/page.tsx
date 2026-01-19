@@ -116,6 +116,7 @@ export default function BookPage({ params }: BookPageProps) {
             {book.gradeLevel && (
               <MetaItem label="Grade Level" value={book.gradeLevel} />
             )}
+
           </div>
         </div>
       </div>

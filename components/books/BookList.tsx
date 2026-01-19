@@ -31,7 +31,7 @@ export function BookList() {
         <TableRow>
           <TableHead>Title</TableHead>
           <TableHead>Authors</TableHead>
-          <TableHead>Scrape Status</TableHead>
+          <TableHead>Details Status</TableHead>
           <TableHead>Cover Status</TableHead>
           <TableHead>Source</TableHead>
         </TableRow>
@@ -64,7 +64,7 @@ export function BookList() {
   )
 }
 
-function StatusBadge({ status }: { status: 'pending' | 'complete' | 'error' }) {
+function StatusBadge({ status }: { status: 'basic' | 'queued' | 'complete' | 'error' }) {
   const variant = status === 'complete' ? 'default' : status === 'error' ? 'destructive' : 'secondary'
 
   return <Badge variant={variant}>{status}</Badge>

@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import Image from 'next/image'
-import { useQuery, useAction } from 'convex/react'
+import Link from 'next/link'
+import { useQuery, useAction, useMutation } from 'convex/react'
 import { api } from '@/convex/_generated/api'
 import { Id } from '@/convex/_generated/dataModel'
 import { Badge } from '@/components/ui/badge'
@@ -16,7 +17,14 @@ type BookCardProps = {
 export function BookCard({ bookId }: BookCardProps) {
   const book = useQuery(api.books.queries.get, { id: bookId })
   const refreshCover = useAction(api.scraping.refreshCover.refreshCoverFromAmazon)
+  const enrichBook = useAction(api.scraping.enrichBook.enrichBook)
+  const scrapeSeries = useAction(api.scraping.scrapeSeries.scrapeSeries)
+  const createSeriesFromBook = useMutation(api.series.mutations.createFromBook)
+
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isEnriching, setIsEnriching] = useState(false)
+  const [isCreatingSeries, setIsCreatingSeries] = useState(false)
+  const [isScrapingSeries, setIsScrapingSeries] = useState(false)
 
   if (book === undefined) {
     return <p className="text-muted-foreground">Loading book...</p>
@@ -37,12 +45,50 @@ export function BookCard({ bookId }: BookCardProps) {
     }
   }
 
+  async function handleEnrichBook() {
+    setIsEnriching(true)
+    try {
+      await enrichBook({ bookId })
+      console.log('✅ Book enriched')
+    } catch (error) {
+      console.error('🚨 Failed to enrich book', error)
+    } finally {
+      setIsEnriching(false)
+    }
+  }
+
+  async function handleCreateSeries() {
+    setIsCreatingSeries(true)
+    try {
+      const seriesId = await createSeriesFromBook({ bookId })
+      console.log('✅ Created series', { seriesId })
+    } catch (error) {
+      console.error('🚨 Failed to create series', error)
+    } finally {
+      setIsCreatingSeries(false)
+    }
+  }
+
+  async function handleScrapeSeries() {
+    if (!book?.seriesId) return
+
+    setIsScrapingSeries(true)
+    try {
+      const result = await scrapeSeries({ seriesId: book.seriesId })
+      console.log('✅ Scraped series', result)
+    } catch (error) {
+      console.error('🚨 Failed to scrape series', error)
+    } finally {
+      setIsScrapingSeries(false)
+    }
+  }
+
   return (
     <Card className="max-w-2xl">
       <CardHeader>
         <div className="flex gap-2 mb-2">
-          <Badge variant={book.scrapeStatus === 'complete' ? 'default' : 'secondary'}>
-            Scrape: {book.scrapeStatus}
+          <Badge variant={book.detailsStatus === 'complete' ? 'default' : 'secondary'}>
+            Details: {book.detailsStatus}
           </Badge>
           <Badge variant={book.coverStatus === 'complete' ? 'default' : 'secondary'}>
             Cover: {book.coverStatus}
@@ -53,23 +99,48 @@ export function BookCard({ bookId }: BookCardProps) {
 
         {book.subtitle && <CardDescription>{book.subtitle}</CardDescription>}
 
-        {book.seriesName && (
-          <p className="text-sm text-muted-foreground">
-            {book.seriesUrl ? (
-              <a href={book.seriesUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">
-                {book.seriesName}
-                {book.seriesPosition && ` #${book.seriesPosition}`}
+        {/* Series info */}
+        {(book.seriesName || book.seriesId) && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm text-muted-foreground">
+              {book.seriesName}
+              {book.seriesPosition && ` #${book.seriesPosition}`}
+            </span>
+
+            {book.seriesId ? (
+              <Link href={`/ad/series/${book.seriesId}`}>
+                <Badge variant="outline" className="cursor-pointer hover:bg-accent">
+                  View Series →
+                </Badge>
+              </Link>
+            ) : book.seriesName ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleCreateSeries}
+                disabled={isCreatingSeries}
+                className="h-6 text-xs"
+              >
+                {isCreatingSeries ? '🌀 Creating...' : '+ Create Series'}
+              </Button>
+            ) : null}
+
+            {book.seriesUrl && !book.seriesId && (
+              <a
+                href={book.seriesUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-blue-500 hover:underline"
+              >
+                (Amazon)
               </a>
-            ) : (
-              <>
-                {book.seriesName}
-                {book.seriesPosition && ` #${book.seriesPosition}`}
-              </>
             )}
-          </p>
+          </div>
         )}
 
-        <p className="text-sm text-muted-foreground">by {book.authors.join(', ')}</p>
+        <p className="text-sm text-muted-foreground">
+          by {book.authors.length > 0 ? book.authors.join(', ') : 'Unknown author'}
+        </p>
       </CardHeader>
 
       <CardContent className="space-y-4">
@@ -77,16 +148,48 @@ export function BookCard({ bookId }: BookCardProps) {
           {book.coverUrl && <BookCoverImage url={book.coverUrl} title={book.title} />}
 
           <div className="space-y-2">
-            {book.amazonUrl && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleRefreshCover}
-                disabled={isRefreshing || book.coverStatus === 'pending'}
-              >
-                {isRefreshing || book.coverStatus === 'pending' ? '🌀 Refreshing...' : '🔄 Refresh Cover'}
-              </Button>
-            )}
+            <div className="flex gap-2 flex-wrap">
+              {book.detailsStatus === 'basic' && (
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={handleEnrichBook}
+                  disabled={isEnriching}
+                >
+                  {isEnriching ? '🌀 Enriching...' : '✨ Enrich Book'}
+                </Button>
+              )}
+
+              {book.amazonUrl && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRefreshCover}
+                  disabled={isRefreshing || book.coverStatus === 'pending'}
+                >
+                  {isRefreshing || book.coverStatus === 'pending' ? '🌀 Refreshing...' : '🔄 Refresh Cover'}
+                </Button>
+              )}
+
+              {book.seriesInfo?.sourceUrl && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleScrapeSeries}
+                  disabled={isScrapingSeries}
+                >
+                  {isScrapingSeries ? '🌀 Scraping...' : '📚 Scrape Series'}
+                </Button>
+              )}
+
+              {book.seriesInfo && !book.seriesInfo.sourceUrl && (
+                <Link href={`/ad/series/${book.seriesId}`}>
+                  <Button variant="outline" size="sm">
+                    ⚠️ Add Series URL
+                  </Button>
+                </Link>
+              )}
+            </div>
 
             {/* Debug: Cover URL links */}
             <div className="text-xs space-y-1 text-muted-foreground">
@@ -168,14 +271,25 @@ export function BookCard({ bookId }: BookCardProps) {
         </div>
 
         {book.amazonUrl && (
-          <a
-            href={book.amazonUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm text-blue-500 hover:underline"
-          >
-            View on Amazon →
-          </a>
+          <div className="space-y-3">
+            <div className="p-3 bg-muted rounded-md">
+              <p className="text-sm text-muted-foreground mb-2">
+                Run this command locally to scrape the book:
+              </p>
+              <code className="text-xs bg-background px-2 py-1 rounded block overflow-x-auto">
+                bunx tsx scripts/scrape-book.ts "{book.amazonUrl}"
+              </code>
+            </div>
+
+            <a
+              href={book.amazonUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-blue-500 hover:underline"
+            >
+              View on Amazon →
+            </a>
+          </div>
         )}
       </CardContent>
     </Card>
