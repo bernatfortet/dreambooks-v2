@@ -58,7 +58,6 @@ async function scrapeBookWithFirecrawl(url: string): Promise<ScrapeResult<BookDa
 
   const normalized: BookData = {
     title: result.data.title ?? null,
-    subtitle: result.data.subtitle ?? null,
     authors: result.data.authors ?? [],
     amazonAuthorIds: [], // Firecrawl can't extract this from links
     contributors: (result.data.authors ?? []).map((name) => ({

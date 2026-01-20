@@ -64,7 +64,6 @@ export const crawlBook = action({
       // Convert null to undefined (Convex validators don't accept null)
       const bookId: Id<'books'> = await context.runMutation(internal.books.mutations.upsertFromScrape, {
         title: bookData.title,
-        subtitle: bookData.subtitle ?? undefined,
         authors: bookData.authors,
         isbn10: bookData.isbn10 ?? undefined,
         isbn13: bookData.isbn13 ?? undefined,

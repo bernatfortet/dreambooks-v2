@@ -48,7 +48,6 @@ export type Contributor = {
 
 export type BookData = {
   title: string | null
-  subtitle: string | null
   authors: string[] // Kept for backward compatibility - derived from contributors
   // Amazon author IDs extracted from byline links - used for linking to authors table
   amazonAuthorIds: string[] // Kept for backward compatibility - derived from contributors
@@ -88,7 +87,6 @@ export type BookData = {
 // Type representing what Firecrawl extraction returns (matches bookExtractionSchema)
 export type BookExtractionResult = {
   title?: string
-  subtitle?: string
   authors?: string[]
   isbn10?: string
   isbn13?: string
@@ -111,7 +109,6 @@ export const bookExtractionSchema = {
   type: 'object',
   properties: {
     title: { type: 'string', description: 'Book title without series info' },
-    subtitle: { type: 'string' },
     authors: { type: 'array', items: { type: 'string' } },
     isbn10: { type: 'string' },
     isbn13: { type: 'string' },

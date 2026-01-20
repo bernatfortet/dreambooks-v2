@@ -34,7 +34,6 @@ export async function parseBookFromPage(page: Page, options: ParseBookOptions = 
   await dumpPageHtml(page, `book_${extractAsinFromUrl(page.url()) ?? 'unknown'}`)
 
   const title = await extractTitle(page)
-  const subtitle = await extractSubtitle(page)
   const { names: authors, amazonAuthorIds, contributors } = await extractAuthors(page)
   const { isbn10, isbn13 } = await extractIsbns(page)
   const { publisher, publishedDate } = await extractPublisherInfo(page)
@@ -100,7 +99,6 @@ export async function parseBookFromPage(page: Page, options: ParseBookOptions = 
 
   const bookData: BookData = {
     title,
-    subtitle,
     authors,
     amazonAuthorIds,
     contributors,
@@ -223,19 +221,6 @@ async function extractTitle(page: Page): Promise<string | null> {
       .trim()
 
     return cleaned || null
-  } catch {
-    return null
-  }
-}
-
-async function extractSubtitle(page: Page): Promise<string | null> {
-  try {
-    const element = page.locator('#productSubtitle').first()
-    const isVisible = await element.isVisible({ timeout: visibilityTimeoutMs }).catch(() => false)
-    if (!isVisible) return null
-
-    const text = await element.textContent({ timeout: textContentTimeoutMs }).catch(() => null)
-    return text?.trim() ?? null
   } catch {
     return null
   }
@@ -376,11 +361,17 @@ async function extractAsin(page: Page): Promise<string | null> {
 async function extractPublisherInfo(page: Page): Promise<{ publisher: string | null; publishedDate: string | null }> {
   const publisherRaw = await extractDetailValue(page, 'Publisher')
 
-  if (!publisherRaw) return { publisher: null, publishedDate: null }
+  // Try to get publication date from dedicated field first (newer Amazon format)
+  let publishedDate = await extractDetailValue(page, 'Publication date')
 
-  const dateMatch = publisherRaw.match(/\(([^)]+)\)$/)
-  const publishedDate = dateMatch?.[1]?.trim() ?? null
-  const publisher = publisherRaw.replace(/\s*\([^)]+\)$/, '').trim()
+  // Fallback: extract date from parentheses in Publisher field (older format: "Publisher (Date)")
+  if (!publishedDate && publisherRaw) {
+    const dateMatch = publisherRaw.match(/\(([^)]+)\)$/)
+    publishedDate = dateMatch?.[1]?.trim() ?? null
+  }
+
+  // Clean publisher name (remove date in parentheses if present)
+  const publisher = publisherRaw?.replace(/\s*\([^)]+\)$/, '').trim() ?? null
 
   return { publisher, publishedDate }
 }
