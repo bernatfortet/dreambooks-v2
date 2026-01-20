@@ -5,6 +5,9 @@ import { v } from 'convex/values'
 import { extractSeriesId, normalizeAmazonUrl } from '../scraping/adapters/amazon/url'
 import { Doc } from '../_generated/dataModel'
 import { internal } from '../_generated/api'
+import { SCRAPE_VERSIONS } from '../lib/scrapeVersions'
+import { generateUniqueSlug, generateUniqueBookSlug } from '../lib/slug'
+import { deleteScrapeArtifacts, clearScrapeQueueReferences, deleteStorageFile } from '../lib/deleteHelpers'
 
 // Type for book entry in series scrape
 type SeriesBookEntry = {
@@ -26,7 +29,7 @@ async function findExistingSeriesByIdentifiers(
     sourceId?: string
     sourceUrl?: string
     name: string
-  }
+  },
 ): Promise<Doc<'series'> | null> {
   const { sourceId, sourceUrl, name } = params
 
@@ -80,6 +83,8 @@ export const upsert = internalMutation({
     source: v.string(),
     sourceUrl: v.optional(v.string()),
     description: v.optional(v.string()),
+    firstSeenFromUrl: v.optional(v.string()),
+    firstSeenReason: v.optional(v.string()),
   },
   handler: async (context, args) => {
     // Extract sourceId from URL if amazon
@@ -102,6 +107,13 @@ export const upsert = internalMutation({
           sourceId,
         })
       }
+      // Only set firstSeenFromUrl/firstSeenReason if series doesn't already have them (preserve original provenance)
+      if (args.firstSeenFromUrl && !existingSeries.firstSeenFromUrl) {
+        await context.db.patch(existingSeries._id, {
+          firstSeenFromUrl: args.firstSeenFromUrl,
+          firstSeenReason: args.firstSeenReason,
+        })
+      }
 
       return existingSeries._id
     }
@@ -115,11 +127,14 @@ export const upsert = internalMutation({
       sourceUrl: args.sourceUrl,
       sourceId,
       description: args.description,
+      firstSeenFromUrl: args.firstSeenFromUrl,
+      firstSeenReason: args.firstSeenReason,
       completeness: 'unknown',
       scrapeStatus: 'pending',
       createdAt: Date.now(),
     })
-
+    const slug = await generateUniqueSlug(context, 'series', args.name, seriesId)
+    await context.db.patch(seriesId, { slug })
     return seriesId
   },
 })
@@ -131,17 +146,9 @@ export const updateStatus = internalMutation({
   args: {
     seriesId: v.id('series'),
     scrapeStatus: v.optional(
-      v.union(
-        v.literal('pending'),
-        v.literal('processing'),
-        v.literal('partial'),
-        v.literal('complete'),
-        v.literal('error')
-      )
+      v.union(v.literal('pending'), v.literal('processing'), v.literal('partial'), v.literal('complete'), v.literal('error')),
     ),
-    completeness: v.optional(
-      v.union(v.literal('unknown'), v.literal('partial'), v.literal('confident'))
-    ),
+    completeness: v.optional(v.union(v.literal('unknown'), v.literal('partial'), v.literal('confident'))),
     lastScrapedAt: v.optional(v.number()),
     lastAttemptedAt: v.optional(v.number()),
     nextPageUrl: v.optional(v.string()),
@@ -153,9 +160,7 @@ export const updateStatus = internalMutation({
     const { seriesId, ...updates } = args
 
     // Filter out undefined values
-    const filteredUpdates = Object.fromEntries(
-      Object.entries(updates).filter(([, value]) => value !== undefined)
-    )
+    const filteredUpdates = Object.fromEntries(Object.entries(updates).filter(([, value]) => value !== undefined))
 
     await context.db.patch(seriesId, filteredUpdates)
   },
@@ -208,9 +213,10 @@ export const updateFromScrape = internalMutation({
     lastScrapedPage: v.optional(v.number()),
     totalPages: v.optional(v.number()),
     nextPageUrl: v.optional(v.string()),
+    scrapeVersion: v.optional(v.number()),
   },
   handler: async (context, args) => {
-    const { seriesId, name, ...updates } = args
+    const { seriesId, name, scrapeVersion, ...updates } = args
 
     // Only update name if it passes validation (prevent bad data from poisoning the series)
     let validatedName: string | undefined
@@ -223,8 +229,7 @@ export const updateFromScrape = internalMutation({
     // Calculate completeness
     let completeness: 'unknown' | 'partial' | 'confident' = 'unknown'
     if (updates.expectedBookCount !== undefined && updates.discoveredBookCount !== undefined) {
-      completeness =
-        updates.discoveredBookCount >= updates.expectedBookCount ? 'confident' : 'partial'
+      completeness = updates.discoveredBookCount >= updates.expectedBookCount ? 'confident' : 'partial'
     }
 
     // Calculate scrapeStatus based on pagination
@@ -236,9 +241,25 @@ export const updateFromScrape = internalMutation({
     await context.db.patch(seriesId, {
       ...updates,
       ...(validatedName ? { name: validatedName } : {}),
+      ...(scrapeVersion !== undefined ? { scrapeVersion } : {}),
       completeness,
       scrapeStatus,
       lastScrapedAt: Date.now(),
+    })
+  },
+})
+
+/**
+ * Update series cover storage ID.
+ */
+export const updateCover = internalMutation({
+  args: {
+    seriesId: v.id('series'),
+    coverStorageId: v.id('_storage'),
+  },
+  handler: async (context, args) => {
+    await context.db.patch(args.seriesId, {
+      coverStorageId: args.coverStorageId,
     })
   },
 })
@@ -309,7 +330,7 @@ export const completeScrapeRun = internalMutation({
         expectedBookCount: v.optional(v.number()),
         booksFound: v.optional(v.number()),
         coverUrl: v.optional(v.string()),
-      })
+      }),
     ),
   },
   handler: async (context, args) => {
@@ -454,6 +475,8 @@ export const createFromBook = mutation({
         scrapeStatus: 'pending',
         createdAt: Date.now(),
       })
+      const slug = await generateUniqueSlug(context, 'series', book.seriesName, seriesId)
+      await context.db.patch(seriesId, { slug })
     }
 
     // Link the book to the series
@@ -484,6 +507,9 @@ export const upsertFromUrl = mutation({
     sourceUrl: v.string(),
     description: v.optional(v.string()),
     coverImageUrl: v.optional(v.string()),
+    skipCoverDownload: v.optional(v.boolean()),
+    firstSeenFromUrl: v.optional(v.string()),
+    firstSeenReason: v.optional(v.string()),
   },
   returns: v.id('series'),
   handler: async (context, args) => {
@@ -495,6 +521,8 @@ export const upsertFromUrl = mutation({
       sourceUrl: normalizedUrl,
       name: args.name,
     })
+
+    let seriesId: Id<'series'>
 
     if (existingSeries) {
       // Update fields if we have better data
@@ -509,30 +537,155 @@ export const upsertFromUrl = mutation({
       if (args.coverImageUrl && !existingSeries.coverSourceUrl) {
         updates.coverSourceUrl = args.coverImageUrl
       }
+      // Only set firstSeenFromUrl/firstSeenReason if series doesn't already have them (preserve original provenance)
+      if (args.firstSeenFromUrl && !existingSeries.firstSeenFromUrl) {
+        updates.firstSeenFromUrl = args.firstSeenFromUrl
+        updates.firstSeenReason = args.firstSeenReason
+      }
 
       if (Object.keys(updates).length > 0) {
         await context.db.patch(existingSeries._id, updates)
       }
 
-      return existingSeries._id
+      seriesId = existingSeries._id
+    } else {
+      // Create new series
+      console.log('💾 Creating new series from URL', { name: args.name, sourceId })
+
+      seriesId = await context.db.insert('series', {
+        name: args.name,
+        source: 'amazon',
+        sourceUrl: normalizedUrl,
+        sourceId,
+        description: args.description,
+        coverSourceUrl: args.coverImageUrl,
+        firstSeenFromUrl: args.firstSeenFromUrl,
+        firstSeenReason: args.firstSeenReason,
+        completeness: 'unknown',
+        scrapeStatus: 'pending',
+        createdAt: Date.now(),
+      })
+      const slug = await generateUniqueSlug(context, 'series', args.name, seriesId)
+      await context.db.patch(seriesId, { slug })
     }
 
-    // Create new series
-    console.log('💾 Creating new series from URL', { name: args.name, sourceId })
+    // Schedule cover download if needed
+    const isNew = !existingSeries
+    const coverSourceUrlChanged = args.coverImageUrl && args.coverImageUrl !== existingSeries?.coverSourceUrl
+    const needsCover = isNew || coverSourceUrlChanged || !existingSeries?.coverStorageId
 
-    const seriesId = await context.db.insert('series', {
-      name: args.name,
-      source: 'amazon',
-      sourceUrl: normalizedUrl,
-      sourceId,
-      description: args.description,
-      coverSourceUrl: args.coverImageUrl,
-      completeness: 'unknown',
-      scrapeStatus: 'pending',
-      createdAt: Date.now(),
-    })
+    if (args.coverImageUrl && !args.skipCoverDownload && needsCover) {
+      await context.scheduler.runAfter(0, internal.scraping.downloadSeriesCover.downloadSeriesCover, {
+        seriesId,
+        sourceUrl: args.coverImageUrl,
+      })
+    }
 
     return seriesId
+  },
+})
+
+/**
+ * Update a series's slug (for migration).
+ */
+export const updateSlug = mutation({
+  args: {
+    seriesId: v.id('series'),
+    name: v.string(),
+  },
+  returns: v.null(),
+  handler: async (context, args) => {
+    const slug = await generateUniqueSlug(context, 'series', args.name, args.seriesId)
+    await context.db.patch(args.seriesId, { slug })
+    return null
+  },
+})
+
+/**
+ * Schedule cover download for a series if needed.
+ * Used when re-scraping an existing series to ensure cover is downloaded.
+ */
+export const scheduleCoverDownload = mutation({
+  args: {
+    seriesId: v.id('series'),
+    coverImageUrl: v.string(),
+  },
+  returns: v.null(),
+  handler: async (context, args) => {
+    const series = await context.db.get(args.seriesId)
+    if (!series) return null
+
+    const coverSourceUrlChanged = args.coverImageUrl !== series.coverSourceUrl
+    const needsCover = coverSourceUrlChanged || !series.coverStorageId
+
+    if (needsCover) {
+      await context.db.patch(args.seriesId, { coverSourceUrl: args.coverImageUrl })
+      await context.scheduler.runAfter(0, internal.scraping.downloadSeriesCover.downloadSeriesCover, {
+        seriesId: args.seriesId,
+        sourceUrl: args.coverImageUrl,
+      })
+    }
+
+    return null
+  },
+})
+
+/**
+ * Update series sourceUrl and cover image URL.
+ * Used by migration scripts to update series data from book pages.
+ */
+export const updateSourceUrlAndCover = mutation({
+  args: {
+    seriesId: v.id('series'),
+    sourceUrl: v.optional(v.string()),
+    coverImageUrl: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (context, args) => {
+    const series = await context.db.get(args.seriesId)
+
+    if (!series) {
+      throw new Error('Series not found')
+    }
+
+    const patchData: { sourceUrl?: string; sourceId?: string; coverSourceUrl?: string } = {}
+
+    // Update sourceUrl if provided
+    if (args.sourceUrl) {
+      const sourceId = extractSeriesId(args.sourceUrl) ?? undefined
+      const normalizedUrl = normalizeAmazonUrl(args.sourceUrl)
+
+      patchData.sourceUrl = normalizedUrl
+      if (sourceId) {
+        patchData.sourceId = sourceId
+      }
+    }
+
+    // Update coverSourceUrl if provided
+    if (args.coverImageUrl) {
+      patchData.coverSourceUrl = args.coverImageUrl
+    }
+
+    if (Object.keys(patchData).length === 0) {
+      return null
+    }
+
+    await context.db.patch(args.seriesId, patchData)
+
+    // Schedule cover download if coverImageUrl was provided and changed
+    if (args.coverImageUrl) {
+      const coverSourceUrlChanged = args.coverImageUrl !== series.coverSourceUrl
+      const needsCover = coverSourceUrlChanged || !series.coverStorageId
+
+      if (needsCover) {
+        await context.scheduler.runAfter(0, internal.scraping.downloadSeriesCover.downloadSeriesCover, {
+          seriesId: args.seriesId,
+          sourceUrl: args.coverImageUrl,
+        })
+      }
+    }
+
+    return null
   },
 })
 
@@ -584,9 +737,12 @@ export const saveFromCliScrape = mutation({
   args: {
     seriesId: v.id('series'),
     seriesName: v.string(),
+    sourceUrl: v.optional(v.string()),
     description: v.optional(v.string()),
     coverImageUrl: v.optional(v.string()),
     expectedBookCount: v.optional(v.number()),
+    scrapeVersion: v.optional(v.number()),
+    skipCoverDownload: v.optional(v.boolean()),
     books: v.array(
       v.object({
         title: v.string(),
@@ -595,14 +751,14 @@ export const saveFromCliScrape = mutation({
         position: v.optional(v.number()),
         coverImageUrl: v.optional(v.string()),
         authors: v.optional(v.array(v.string())),
-      })
+      }),
     ),
     pagination: v.optional(
       v.object({
         currentPage: v.number(),
         totalPages: v.optional(v.number()),
         nextPageUrl: v.optional(v.string()),
-      })
+      }),
     ),
   },
   returns: v.object({
@@ -616,6 +772,39 @@ export const saveFromCliScrape = mutation({
 
     let pendingCount = 0
     let skippedCount = 0
+
+    // Update sourceUrl if provided (ensures series URL is captured even for re-scrapes)
+    if (args.sourceUrl) {
+      const series = await context.db.get(args.seriesId)
+      if (series && !series.sourceUrl) {
+        const sourceId = extractSeriesId(args.sourceUrl) ?? undefined
+        const normalizedUrl = normalizeAmazonUrl(args.sourceUrl)
+        await context.db.patch(args.seriesId, {
+          sourceUrl: normalizedUrl,
+          sourceId,
+        })
+        console.log('💾 Updated series sourceUrl', { sourceUrl: normalizedUrl, sourceId })
+      }
+    }
+
+    // Store the produced object offline for debugging/version comparisons
+    await context.db.insert('scrapeArtifacts', {
+      entityType: 'series',
+      entityId: args.seriesId,
+      sourceUrl: args.pagination?.nextPageUrl ? 'series-page' : 'series-root',
+      adapter: 'playwright-local',
+      scrapeVersion: args.scrapeVersion ?? SCRAPE_VERSIONS.series,
+      payloadJson: JSON.stringify({
+        seriesId: args.seriesId,
+        seriesName: args.seriesName,
+        description: args.description,
+        coverImageUrl: args.coverImageUrl,
+        expectedBookCount: args.expectedBookCount,
+        books: args.books,
+        pagination: args.pagination,
+      }),
+      createdAt: Date.now(),
+    })
 
     for (const book of args.books) {
       const result = await processBookFromSeriesScrape(context, {
@@ -632,15 +821,30 @@ export const saveFromCliScrape = mutation({
       }
     }
 
+    // Get series before update to detect cover URL changes
+    const seriesBeforeUpdate = await context.db.get(args.seriesId)
+
     await updateSeriesAfterScrape(context.db, {
       seriesId: args.seriesId,
       seriesName: args.seriesName,
       description: args.description,
       coverImageUrl: args.coverImageUrl,
       expectedBookCount: args.expectedBookCount,
+      scrapeVersion: args.scrapeVersion,
       booksFound: args.books.length,
       pagination: args.pagination,
     })
+
+    // Schedule cover download if needed (matches upsertFromUrl pattern)
+    const coverSourceUrlChanged = args.coverImageUrl && args.coverImageUrl !== seriesBeforeUpdate?.coverSourceUrl
+    const needsCover = coverSourceUrlChanged || !seriesBeforeUpdate?.coverStorageId
+
+    if (args.coverImageUrl && !args.skipCoverDownload && needsCover) {
+      await context.scheduler.runAfter(0, internal.scraping.downloadSeriesCover.downloadSeriesCover, {
+        seriesId: args.seriesId,
+        sourceUrl: args.coverImageUrl,
+      })
+    }
 
     console.log('✅ CLI scrape saved', { pending: pendingCount, skipped: skippedCount })
 
@@ -663,11 +867,12 @@ async function updateSeriesAfterScrape(
     description?: string
     coverImageUrl?: string
     expectedBookCount?: number
+    scrapeVersion?: number
     booksFound: number
     pagination?: { currentPage: number; totalPages?: number; nextPageUrl?: string }
-  }
+  },
 ) {
-  const { seriesId, seriesName, description, coverImageUrl, expectedBookCount, booksFound, pagination } = params
+  const { seriesId, seriesName, description, coverImageUrl, expectedBookCount, scrapeVersion, booksFound, pagination } = params
 
   const validatedName = isValidSeriesName(seriesName) ? seriesName : undefined
 
@@ -686,6 +891,7 @@ async function updateSeriesAfterScrape(
     description,
     coverSourceUrl: coverImageUrl,
     expectedBookCount,
+    ...(scrapeVersion !== undefined ? { scrapeVersion } : {}),
     discoveredBookCount: booksFound,
     completeness,
     scrapeStatus,
@@ -706,7 +912,7 @@ async function updateSeriesAfterScrape(
 }
 
 async function createBasicBookFromSeriesEntry(
-  db: DatabaseWriter,
+  context: MutationCtx,
   params: {
     seriesId: Id<'series'>
     book: {
@@ -717,27 +923,31 @@ async function createBasicBookFromSeriesEntry(
       coverImageUrl?: string
       authors?: string[]
     }
-  }
+  },
 ): Promise<Id<'books'>> {
   const { seriesId, book } = params
 
-  // Clean title: remove series names in parentheses
-  const cleanedTitle = book.title?.replace(/\s*\([^)]+\)\s*$/, '').trim() || book.title
+  // Clean title: decode HTML entities and remove series names in parentheses
+  const cleanedTitle = decodeHtmlEntities(book.title?.replace(/\s*\([^)]+\)\s*$/, '').trim() || book.title)
 
-  return await db.insert('books', {
+  const bookId = await context.db.insert('books', {
     title: cleanedTitle,
     authors: book.authors ?? [],
     asin: book.asin,
     amazonUrl: book.amazonUrl,
     seriesId,
-    coverSourceUrl: book.coverImageUrl,
+    ...(book.coverImageUrl && {
+      cover: { sourceUrl: book.coverImageUrl },
+    }),
     source: 'amazon',
     detailsStatus: 'basic',
     coverStatus: book.coverImageUrl ? 'pending' : 'error',
     scrapedAt: Date.now(),
-    // Only include seriesPosition if it's actually a number
     ...(book.position != null && { seriesPosition: book.position }),
   })
+  const slug = await generateUniqueBookSlug(context, cleanedTitle, book.authors ?? [], undefined, bookId)
+  await context.db.patch(bookId, { slug })
+  return bookId
 }
 
 async function linkBookToSeriesIfNeeded(
@@ -746,7 +956,7 @@ async function linkBookToSeriesIfNeeded(
     bookId: Id<'books'>
     seriesId: Id<'series'>
     position?: number
-  }
+  },
 ) {
   const { bookId, seriesId, position } = params
 
@@ -771,13 +981,30 @@ async function findExistingBookByAsin(db: DatabaseReader, asin?: string) {
 }
 
 /**
+ * Decode common HTML entities in a string.
+ */
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+}
+
+/**
+ * Normalize title for comparison (decode HTML entities, lowercase, collapse whitespace).
+ */
+function normalizeTitle(title: string): string {
+  return decodeHtmlEntities(title).toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+/**
  * Find existing book by title within a series.
  * Used as fallback when ASIN doesn't match (different editions have different ASINs).
  */
-async function findExistingBookByTitleInSeries(
-  db: DatabaseReader,
-  params: { title: string; seriesId: Id<'series'> }
-) {
+async function findExistingBookByTitleInSeries(db: DatabaseReader, params: { title: string; seriesId: Id<'series'> }) {
   const { title, seriesId } = params
 
   // Get all books in the series
@@ -786,8 +1013,6 @@ async function findExistingBookByTitleInSeries(
     .withIndex('by_seriesId', (query) => query.eq('seriesId', seriesId))
     .collect()
 
-  // Normalize title for comparison (lowercase, remove extra whitespace)
-  const normalizeTitle = (t: string) => t.toLowerCase().replace(/\s+/g, ' ').trim()
   const normalizedSearchTitle = normalizeTitle(title)
 
   // Find a book with matching title
@@ -805,7 +1030,7 @@ async function findExistingBookByTitleInSeries(
  */
 async function processBookFromSeriesScrape(
   context: MutationCtx,
-  params: { seriesId: Id<'series'>; book: SeriesBookEntry }
+  params: { seriesId: Id<'series'>; book: SeriesBookEntry },
 ): Promise<{ status: 'created' | 'skipped'; bookId?: Id<'books'> }> {
   const { seriesId, book } = params
 
@@ -831,12 +1056,11 @@ async function processBookFromSeriesScrape(
   }
 
   // Create new book
-  const bookId = await createBasicBookFromSeriesEntry(context.db, {
+  const bookId = await createBasicBookFromSeriesEntry(context, {
     seriesId,
     book,
   })
 
-  // Schedule cover download if available
   if (book.coverImageUrl) {
     await context.scheduler.runAfter(0, internal.scraping.downloadCover.downloadCover, {
       bookId,
@@ -847,3 +1071,74 @@ async function processBookFromSeriesScrape(
   return { status: 'created', bookId }
 }
 
+/**
+ * Delete a series (admin utility).
+ * Cascades to delete:
+ * - All books in the series (with full cascade)
+ * - All seriesScrapeRuns entries
+ * - Cover storage file
+ * - Scrape artifacts
+ * - Scrape queue references
+ */
+export const deleteSeries = mutation({
+  args: {
+    seriesId: v.id('series'),
+  },
+  returns: v.null(),
+  handler: async (context, args) => {
+    const series = await context.db.get(args.seriesId)
+
+    if (!series) {
+      throw new Error('Series not found')
+    }
+
+    console.log('🗑️ Deleting series', { seriesId: args.seriesId, name: series.name })
+
+    // Find all books in this series
+    const booksInSeries = await context.db
+      .query('books')
+      .withIndex('by_seriesId', (q) => q.eq('seriesId', args.seriesId))
+      .collect()
+
+    // Delete each book (cascades to bookAuthors, bookAwards, etc.)
+    for (const book of booksInSeries) {
+      await context.runMutation(internal.books.mutations.internalDeleteBook, {
+        bookId: book._id,
+      })
+    }
+
+    // Delete all seriesScrapeRuns entries
+    const scrapeRuns = await context.db
+      .query('seriesScrapeRuns')
+      .withIndex('by_seriesId', (q) => q.eq('seriesId', args.seriesId))
+      .collect()
+
+    for (const run of scrapeRuns) {
+      await context.db.delete(run._id)
+    }
+
+    // Delete cover storage file
+    if (series.coverStorageId) {
+      await deleteStorageFile(context.storage, series.coverStorageId)
+    }
+
+    // Delete scrape artifacts
+    const artifactsDeleted = await deleteScrapeArtifacts(context.db, 'series', args.seriesId)
+
+    // Clear scrape queue references
+    const queueCleared = await clearScrapeQueueReferences(context.db, 'series', args.seriesId)
+
+    // Delete the series
+    await context.db.delete(args.seriesId)
+
+    console.log('✅ Series deleted', {
+      seriesId: args.seriesId,
+      booksDeleted: booksInSeries.length,
+      scrapeRunsDeleted: scrapeRuns.length,
+      artifactsDeleted,
+      queueCleared,
+    })
+
+    return null
+  },
+})

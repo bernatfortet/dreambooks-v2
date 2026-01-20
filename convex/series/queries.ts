@@ -1,5 +1,6 @@
 import { query, internalQuery } from '../_generated/server'
 import { v } from 'convex/values'
+import { Id, Doc } from '../_generated/dataModel'
 
 /**
  * List all series for display.
@@ -10,14 +11,14 @@ export const list = query({
 
     const seriesWithCovers = await Promise.all(
       allSeries.map(async (series) => {
-        const coverUrl = series.coverStorageId
-          ? await context.storage.getUrl(series.coverStorageId)
-          : null
+        const coverUrl = series.coverStorageId ? await context.storage.getUrl(series.coverStorageId) : null
 
         return {
           _id: series._id,
+          slug: series.slug,
           name: series.name,
           source: series.source,
+          sourceUrl: series.sourceUrl, // ADD THIS
           coverUrl,
           expectedBookCount: series.expectedBookCount,
           discoveredBookCount: series.discoveredBookCount,
@@ -26,7 +27,7 @@ export const list = query({
           scrapeStatus: series.scrapeStatus,
           createdAt: series.createdAt,
         }
-      })
+      }),
     )
 
     return seriesWithCovers
@@ -39,12 +40,29 @@ export const list = query({
 export const get = query({
   args: { id: v.id('series') },
   handler: async (context, args) => {
-    const series = await context.db.get(args.id)
+    const series = (await context.db.get(args.id)) as Doc<'series'> | null
     if (!series) return null
 
-    const coverUrl = series.coverStorageId
-      ? await context.storage.getUrl(series.coverStorageId)
-      : null
+    const coverUrl = series.coverStorageId ? await context.storage.getUrl(series.coverStorageId) : null
+
+    return { ...series, coverUrl }
+  },
+})
+
+/**
+ * Get a single series by slug.
+ */
+export const getBySlug = query({
+  args: { slug: v.string() },
+  handler: async (context, args) => {
+    const series = await context.db
+      .query('series')
+      .withIndex('by_slug', (q) => q.eq('slug', args.slug))
+      .first()
+
+    if (!series) return null
+
+    const coverUrl = series.coverStorageId ? await context.storage.getUrl(series.coverStorageId) : null
 
     return { ...series, coverUrl }
   },
@@ -56,12 +74,10 @@ export const get = query({
 export const getWithBooks = query({
   args: { id: v.id('series') },
   handler: async (context, args) => {
-    const series = await context.db.get(args.id)
+    const series = (await context.db.get(args.id)) as Doc<'series'> | null
     if (!series) return null
 
-    const coverUrl = series.coverStorageId
-      ? await context.storage.getUrl(series.coverStorageId)
-      : null
+    const coverUrl = series.coverStorageId ? await context.storage.getUrl(series.coverStorageId) : null
 
     // Get scraped books in this series
     const books = await context.db
@@ -71,12 +87,150 @@ export const getWithBooks = query({
 
     const booksWithCovers = await Promise.all(
       books.map(async (book) => {
-        const bookCoverUrl = book.coverStorageId
-          ? await context.storage.getUrl(book.coverStorageId)
-          : null
+        // Check nested cover first, fall back to flat field
+        const bookCoverStorageId = book.cover?.storageIdMedium
+        const bookCoverUrl = bookCoverStorageId ? await context.storage.getUrl(bookCoverStorageId) : null
 
         return {
           _id: book._id,
+          slug: book.slug,
+          title: book.title,
+          authors: book.authors,
+          seriesPosition: book.seriesPosition,
+          coverUrl: bookCoverUrl,
+        }
+      }),
+    )
+
+    // Sort books by series position
+    booksWithCovers.sort((a, b) => (a.seriesPosition ?? 999) - (b.seriesPosition ?? 999))
+
+    return {
+      _id: series._id,
+      name: series.name,
+      description: series.description,
+      coverUrl,
+      books: booksWithCovers,
+    }
+  },
+})
+
+/**
+ * Get a series with its books by slug (user-facing, no discoveries).
+ */
+export const getWithBooksBySlug = query({
+  args: { slug: v.string() },
+  handler: async (context, args) => {
+    const series = await context.db
+      .query('series')
+      .withIndex('by_slug', (q) => q.eq('slug', args.slug))
+      .first()
+
+    if (!series) return null
+
+    const coverUrl = series.coverStorageId ? await context.storage.getUrl(series.coverStorageId) : null
+
+    // Get scraped books in this series
+    const books = await context.db
+      .query('books')
+      .withIndex('by_seriesId', (query) => query.eq('seriesId', series._id))
+      .collect()
+
+    const booksWithCovers = await Promise.all(
+      books.map(async (book) => {
+        // Check nested cover first, fall back to flat field
+        const bookCoverStorageId = book.cover?.storageIdMedium
+        const bookCoverUrl = bookCoverStorageId ? await context.storage.getUrl(bookCoverStorageId) : null
+
+        return {
+          _id: book._id,
+          slug: book.slug,
+          title: book.title,
+          authors: book.authors,
+          seriesPosition: book.seriesPosition,
+          coverUrl: bookCoverUrl,
+        }
+      }),
+    )
+
+    // Sort books by series position
+    booksWithCovers.sort((a, b) => (a.seriesPosition ?? 999) - (b.seriesPosition ?? 999))
+
+    return {
+      _id: series._id,
+      name: series.name,
+      description: series.description,
+      coverUrl,
+      books: booksWithCovers,
+    }
+  },
+})
+
+export const getBySlugOrId = query({
+  args: { slugOrId: v.string() },
+  handler: async (context, args) => {
+    // Try slug first
+    const bySlug = await context.db
+      .query('series')
+      .withIndex('by_slug', (q) => q.eq('slug', args.slugOrId))
+      .first()
+    if (bySlug) {
+      const coverUrl = bySlug.coverStorageId ? await context.storage.getUrl(bySlug.coverStorageId) : null
+      return { ...bySlug, coverUrl }
+    }
+
+    // Fall back to id lookup
+    try {
+      const byId = (await context.db.get(args.slugOrId as Id<'series'>)) as Doc<'series'> | null
+      if (byId) {
+        const coverUrl = byId.coverStorageId ? await context.storage.getUrl(byId.coverStorageId) : null
+        return { ...byId, coverUrl }
+      }
+    } catch {
+      // Invalid id format, return null
+    }
+
+    return null
+  },
+})
+
+export const getWithBooksBySlugOrId = query({
+  args: { slugOrId: v.string() },
+  handler: async (context, args) => {
+    // Try slug first
+    let series = await context.db
+      .query('series')
+      .withIndex('by_slug', (q) => q.eq('slug', args.slugOrId))
+      .first()
+
+    // Fall back to id lookup
+    if (!series) {
+      try {
+        series = (await context.db.get(args.slugOrId as Id<'series'>)) as Doc<'series'> | null
+      } catch {
+        // Invalid id format
+      }
+    }
+
+    if (!series) return null
+
+    const coverUrl = series.coverStorageId ? await context.storage.getUrl(series.coverStorageId) : null
+
+    // Get scraped books in this series
+    const books = await context.db
+      .query('books')
+      .withIndex('by_seriesId', (query) => query.eq('seriesId', series._id))
+      .collect()
+
+    const booksWithCovers = await Promise.all(
+      books.map(async (book) => {
+        // Check nested cover first, fall back to flat field
+        const bookCoverStorageId = book.cover?.storageIdMedium
+        const bookCoverUrl = bookCoverStorageId ? await context.storage.getUrl(bookCoverStorageId) : null
+
+        return {
+          _id: book._id,
+          slug: book.slug,
           title: book.title,
           authors: book.authors,
           seriesPosition: book.seriesPosition,
@@ -104,12 +258,10 @@ export const getWithBooks = query({
 export const getWithDiscoveries = query({
   args: { id: v.id('series') },
   handler: async (context, args) => {
-    const series = await context.db.get(args.id)
+    const series = (await context.db.get(args.id)) as Doc<'series'> | null
     if (!series) return null
 
-    const coverUrl = series.coverStorageId
-      ? await context.storage.getUrl(series.coverStorageId)
-      : null
+    const coverUrl = series.coverStorageId ? await context.storage.getUrl(series.coverStorageId) : null
 
     // Get scraped books in this series
     const books = await context.db
@@ -119,9 +271,9 @@ export const getWithDiscoveries = query({
 
     const booksWithCovers = await Promise.all(
       books.map(async (book) => {
-        const bookCoverUrl = book.coverStorageId
-          ? await context.storage.getUrl(book.coverStorageId)
-          : null
+        // Check nested cover first, fall back to flat field
+        const bookCoverStorageId = book.cover?.storageIdMedium
+        const bookCoverUrl = bookCoverStorageId ? await context.storage.getUrl(bookCoverStorageId) : null
 
         return {
           _id: book._id,
@@ -132,7 +284,7 @@ export const getWithDiscoveries = query({
           detailsStatus: book.detailsStatus,
           coverStatus: book.coverStatus,
         }
-      })
+      }),
     )
 
     // Sort books by series position
@@ -154,7 +306,7 @@ export const getWithDiscoveries = query({
 export const getInternal = internalQuery({
   args: { id: v.id('series') },
   handler: async (context, args) => {
-    const series = await context.db.get(args.id)
+    const series = (await context.db.get(args.id)) as Doc<'series'> | null
 
     return series
   },
@@ -191,7 +343,7 @@ export const listNeedingScrape = query({
       sourceUrl: v.optional(v.string()),
       nextPageUrl: v.optional(v.string()),
       scrapeStatus: v.string(),
-    })
+    }),
   ),
   handler: async (context, args) => {
     const limit = args.limit ?? 10
@@ -225,6 +377,35 @@ export const listNeedingScrape = query({
 })
 
 /**
+ * List series that have coverSourceUrl but no coverStorageId (for backfill).
+ */
+export const listMissingCovers = internalQuery({
+  args: {
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(
+    v.object({
+      _id: v.id('series'),
+      coverSourceUrl: v.string(),
+    }),
+  ),
+  handler: async (context, args) => {
+    const limit = args.limit ?? 50
+
+    // Get all series and filter in-memory (no index on coverStorageId)
+    const allSeries = await context.db.query('series').collect()
+
+    return allSeries
+      .filter((s) => s.coverSourceUrl && !s.coverStorageId)
+      .slice(0, limit)
+      .map((s) => ({
+        _id: s._id,
+        coverSourceUrl: s.coverSourceUrl!,
+      }))
+  },
+})
+
+/**
  * Get series that need URL discovery (pending status, no sourceUrl, but has books).
  * Used by local scraping worker to find series URLs from book pages.
  */
@@ -237,7 +418,7 @@ export const listNeedingUrlDiscovery = query({
       _id: v.id('series'),
       name: v.string(),
       bookAmazonUrl: v.string(),
-    })
+    }),
   ),
   handler: async (context, args) => {
     const limit = args.limit ?? 5
@@ -250,7 +431,7 @@ export const listNeedingUrlDiscovery = query({
 
     const seriesNeedingUrl = pendingSeries.filter((s) => !s.sourceUrl)
 
-    const results: Array<{ _id: typeof seriesNeedingUrl[0]['_id']; name: string; bookAmazonUrl: string }> = []
+    const results: Array<{ _id: (typeof seriesNeedingUrl)[0]['_id']; name: string; bookAmazonUrl: string }> = []
 
     for (const series of seriesNeedingUrl) {
       if (results.length >= limit) break
@@ -271,5 +452,45 @@ export const listNeedingUrlDiscovery = query({
     }
 
     return results
+  },
+})
+
+/**
+ * List series with outdated scrape versions (for automatic re-scraping).
+ * Returns series that have sourceUrl and scrapeVersion < currentVersion.
+ */
+export const listOutdatedVersions = query({
+  args: {
+    currentVersion: v.number(),
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(
+    v.object({
+      _id: v.id('series'),
+      name: v.string(),
+      sourceUrl: v.string(),
+      scrapeVersion: v.union(v.number(), v.null()),
+    }),
+  ),
+  handler: async (context, args) => {
+    const limit = args.limit ?? 10
+
+    // Get all series with a sourceUrl (required for re-scraping)
+    const allSeries = await context.db.query('series').collect()
+
+    return allSeries
+      .filter((s) => {
+        // Must have a URL to scrape
+        if (!s.sourceUrl) return false
+        // Include if no version (never scraped) or version is outdated
+        return s.scrapeVersion === undefined || s.scrapeVersion < args.currentVersion
+      })
+      .slice(0, limit)
+      .map((s) => ({
+        _id: s._id,
+        name: s.name,
+        sourceUrl: s.sourceUrl!,
+        scrapeVersion: s.scrapeVersion ?? null,
+      }))
   },
 })

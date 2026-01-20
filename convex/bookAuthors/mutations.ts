@@ -20,29 +20,40 @@ export const linkByAmazonAuthorId = internalMutation({
 
     for (const book of allBooks) {
       const hasAmazonId = book.amazonAuthorIds?.includes(args.amazonAuthorId)
-      const hasNameMatch = book.authors.some(
-        (a) => a.toLowerCase() === args.authorName.toLowerCase()
-      )
+      const hasNameMatch = book.authors.some((a) => a.toLowerCase() === args.authorName.toLowerCase())
 
       if (hasAmazonId || hasNameMatch) {
         // Check if link already exists
         const existing = await context.db
           .query('bookAuthors')
-          .withIndex('by_bookId_authorId', (q) =>
-            q.eq('bookId', book._id).eq('authorId', args.authorId)
-          )
+          .withIndex('by_bookId_authorId', (q) => q.eq('bookId', book._id).eq('authorId', args.authorId))
           .unique()
 
         if (!existing) {
+          // Look up role from book.contributors if available
+          let role: ContributorRole | undefined = undefined
+          if (book.contributors) {
+            const contributor = book.contributors.find(
+              (c) =>
+                (hasAmazonId && c.amazonAuthorId === args.amazonAuthorId) ||
+                (hasNameMatch && c.name.toLowerCase() === args.authorName.toLowerCase()),
+            )
+            if (contributor) {
+              role = toContributorRole(contributor.role)
+            }
+          }
+
           await context.db.insert('bookAuthors', {
             bookId: book._id,
             authorId: args.authorId,
             source: hasAmazonId ? 'amazonAuthorId' : 'nameMatch',
+            role,
             createdAt: Date.now(),
           })
           linkedCount++
 
-          console.log(`   📚 Linked book "${book.title}" to author (${hasAmazonId ? 'amazonAuthorId' : 'nameMatch'})`)
+          const roleText = role ? ` (${role})` : ''
+          console.log(`   📚 Linked book "${book.title}" to author (${hasAmazonId ? 'amazonAuthorId' : 'nameMatch'})${roleText}`)
         }
       }
     }
@@ -61,15 +72,23 @@ export const linkBookToAuthor = internalMutation({
     bookId: v.id('books'),
     authorId: v.id('authors'),
     source: v.string(), // 'amazonAuthorId' | 'nameMatch'
+    role: v.optional(
+      v.union(
+        v.literal('author'),
+        v.literal('illustrator'),
+        v.literal('editor'),
+        v.literal('translator'),
+        v.literal('narrator'),
+        v.literal('other'),
+      ),
+    ),
   },
   returns: v.boolean(),
   handler: async (context, args) => {
     // Check if link already exists
     const existing = await context.db
       .query('bookAuthors')
-      .withIndex('by_bookId_authorId', (q) =>
-        q.eq('bookId', args.bookId).eq('authorId', args.authorId)
-      )
+      .withIndex('by_bookId_authorId', (q) => q.eq('bookId', args.bookId).eq('authorId', args.authorId))
       .unique()
 
     if (existing) {
@@ -80,6 +99,7 @@ export const linkBookToAuthor = internalMutation({
       bookId: args.bookId,
       authorId: args.authorId,
       source: args.source,
+      role: args.role,
       createdAt: Date.now(),
     })
 
@@ -99,9 +119,7 @@ export const unlinkBookFromAuthor = mutation({
   handler: async (context, args) => {
     const link = await context.db
       .query('bookAuthors')
-      .withIndex('by_bookId_authorId', (q) =>
-        q.eq('bookId', args.bookId).eq('authorId', args.authorId)
-      )
+      .withIndex('by_bookId_authorId', (q) => q.eq('bookId', args.bookId).eq('authorId', args.authorId))
       .unique()
 
     if (link) {
@@ -112,3 +130,14 @@ export const unlinkBookFromAuthor = mutation({
     return false
   },
 })
+
+type ContributorRole = 'author' | 'illustrator' | 'editor' | 'translator' | 'narrator' | 'other'
+
+function toContributorRole(role: string): ContributorRole {
+  if (role === 'author') return 'author'
+  if (role === 'illustrator') return 'illustrator'
+  if (role === 'editor') return 'editor'
+  if (role === 'translator') return 'translator'
+  if (role === 'narrator') return 'narrator'
+  return 'other'
+}

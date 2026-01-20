@@ -16,8 +16,15 @@ export const listPending = query({
       scrapeFullSeries: v.boolean(),
       priority: v.number(),
       source: v.union(v.literal('user'), v.literal('discovery')),
+      referrerUrl: v.optional(v.string()),
+      referrerReason: v.optional(v.string()),
       createdAt: v.number(),
-    })
+      // Re-scrape skip options
+      skipSeriesLink: v.optional(v.boolean()),
+      skipAuthorDiscovery: v.optional(v.boolean()),
+      skipBookDiscoveries: v.optional(v.boolean()),
+      skipCoverDownload: v.optional(v.boolean()),
+    }),
   ),
   handler: async (context, args) => {
     const limit = args.limit ?? 10
@@ -34,7 +41,14 @@ export const listPending = query({
       scrapeFullSeries: item.scrapeFullSeries,
       priority: item.priority,
       source: (item.source ?? 'user') as 'user' | 'discovery',
+      referrerUrl: item.referrerUrl,
+      referrerReason: item.referrerReason,
       createdAt: item.createdAt,
+      // Re-scrape skip options
+      skipSeriesLink: item.skipSeriesLink,
+      skipAuthorDiscovery: item.skipAuthorDiscovery,
+      skipBookDiscoveries: item.skipBookDiscoveries,
+      skipCoverDownload: item.skipCoverDownload,
     }))
   },
 })
@@ -49,12 +63,21 @@ export const list = query({
   handler: async (context, args) => {
     const limit = args.limit ?? 50
 
-    const items = await context.db
-      .query('scrapeQueue')
-      .order('desc')
-      .take(limit)
+    const items = await context.db.query('scrapeQueue').order('desc').take(limit)
 
     return items
+  },
+})
+
+/**
+ * Get a single queue item by ID.
+ */
+export const get = query({
+  args: {
+    queueId: v.id('scrapeQueue'),
+  },
+  handler: async (context, args) => {
+    return await context.db.get(args.queueId)
   },
 })
 
