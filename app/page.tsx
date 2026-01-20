@@ -1,16 +1,20 @@
-import { BookGrid } from '@/components/books/BookGrid'
+'use client'
 
-export const dynamic = 'force-dynamic'
+import { useState } from 'react'
+import { BookGrid } from '@/components/books/BookGrid'
+import { BookFilterBar } from '@/components/books/BookFilterBar'
+import type { BookFilters } from '@/components/books/filters/types'
+import { PageContainer } from '@/components/ui/PageContainer'
 
 export default function HomePage() {
-  return (
-    <main className="container mx-auto py-8 px-4">
-      <h1 className="text-3xl font-bold mb-2">Dreambooks</h1>
-      <p className="text-muted-foreground mb-8">
-        Discover and explore children&apos;s books
-      </p>
+  const [filters, setFilters] = useState<BookFilters>({})
 
-      <BookGrid />
+  return (
+    <main className='w-full'>
+      <BookFilterBar filters={filters} onFiltersChange={setFilters} />
+      <PageContainer>
+        <BookGrid filters={filters} />
+      </PageContainer>
     </main>
   )
 }

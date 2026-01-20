@@ -1,13 +1,14 @@
 'use client'
 
-import { SeriesList } from '@/components/series/SeriesList'
+import { SeriesGrid } from '@/components/series/SeriesGrid'
+import { PageContainer } from '@/components/ui/PageContainer'
 
 export default function SeriesPage() {
   return (
-    <main className="container mx-auto py-8 px-4">
-      <h1 className="text-3xl font-bold mb-6">Series</h1>
+    <PageContainer>
+      <h1 className='text-3xl font-bold mb-6'>Series</h1>
 
-      <SeriesList />
-    </main>
+      <SeriesGrid />
+    </PageContainer>
   )
 }
