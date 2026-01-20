@@ -1,7 +1,7 @@
 import type { Page } from 'playwright'
 
 import type { PageManager } from '../browser'
-import { humanDelay, getWorkerId } from '../utils'
+import { humanDelay, getWorkerId, startItemLog, finishItemLog, log, logError } from '../utils'
 import { fetchPendingQueueItems, claimQueueItem } from '../convex'
 import { processBookFromQueue } from '../processors/book'
 import { processSeriesFromQueue } from '../processors/series'
@@ -16,11 +16,7 @@ type FlowResult = {
  *
  * Handles new books, series, and authors added via /ad/ interface.
  */
-export async function processQueueFlow(params: {
-  page: Page
-  pageManager?: PageManager
-  dryRun: boolean
-}): Promise<FlowResult> {
+export async function processQueueFlow(params: { page: Page; pageManager?: PageManager; dryRun: boolean }): Promise<FlowResult> {
   const { pageManager, dryRun } = params
   let { page } = params
 
@@ -52,23 +48,35 @@ export async function processQueueFlow(params: {
 
     await humanDelay(2000, 4000, 'Preparing next item')
 
-    if (item.type === 'book') {
-      const result = await processBookFromQueue({ item, page, dryRun })
-      if (result.success) {
-        workDone = true
+    startItemLog()
+
+    const itemType = item.type
+    let success = false
+
+    try {
+      if (itemType === 'book') {
+        const result = await processBookFromQueue({ item, page, dryRun })
+        success = result.success
+        if (result.success) workDone = true
+      } else if (itemType === 'series') {
+        const result = await processSeriesFromQueue({ item, page, dryRun })
+        success = result.success
+        if (result.success) {
+          workDone = true
+          log(`   📊 Processed ${result.booksProcessed ?? 0} book(s)`)
+        }
+      } else if (itemType === 'author') {
+        const result = await processAuthorFromQueue({ item, page, dryRun })
+        success = result.success
+        if (result.success) {
+          workDone = true
+          log(`   📊 Linked ${result.booksLinked ?? 0} book(s), queued ${result.seriesAdded ?? 0} series`)
+        }
       }
-    } else if (item.type === 'series') {
-      const result = await processSeriesFromQueue({ item, page, dryRun })
-      if (result.success) {
-        workDone = true
-        console.log(`   📊 Processed ${result.booksProcessed ?? 0} book(s)`)
-      }
-    } else if (item.type === 'author') {
-      const result = await processAuthorFromQueue({ item, page, dryRun })
-      if (result.success) {
-        workDone = true
-        console.log(`   📊 Linked ${result.booksLinked ?? 0} book(s), queued ${result.seriesAdded ?? 0} series`)
-      }
+    } catch (error) {
+      logError('   🚨 Queue item crashed', error)
+    } finally {
+      finishItemLog(itemType, item.url, success, item.referrerUrl, item.referrerReason)
     }
 
     await humanDelay(5000, 10000, 'Waiting before next item')

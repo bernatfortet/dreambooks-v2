@@ -18,13 +18,13 @@ import * as dotenv from 'dotenv'
 import { ConvexHttpClient } from 'convex/browser'
 import { chromium, Browser, BrowserContext, Page } from 'playwright'
 
-import { parseBookFromPage } from '../lib/scraping/domains/book/parse'
-import { parseSeriesFromPage } from '../lib/scraping/domains/series/parse'
-import { SeriesBookEntry } from '../lib/scraping/domains/series/types'
-import { BookData } from '../lib/scraping/domains/book/types'
+import { parseBookFromPage } from '@/lib/scraping/domains/book/parse'
+import { parseSeriesFromPage } from '@/lib/scraping/domains/series/parse'
+import { SeriesBookEntry } from '@/lib/scraping/domains/series/types'
+import { BookData } from '@/lib/scraping/domains/book/types'
 import { importBookToConvex } from './lib/convex-client'
-import { api } from '../convex/_generated/api'
-import type { Id } from '../convex/_generated/dataModel'
+import { api } from '@/convex/_generated/api'
+import type { Id } from '@/convex/_generated/dataModel'
 
 dotenv.config({ path: '.env.local' })
 dotenv.config()
@@ -86,11 +86,7 @@ async function connectToBrowser(): Promise<ConnectedBrowser> {
   return { browser, context, page }
 }
 
-async function navigateWithRetry(params: {
-  page: Page
-  url: string
-  maxRetries?: number
-}): Promise<void> {
+async function navigateWithRetry(params: { page: Page; url: string; maxRetries?: number }): Promise<void> {
   const { page, url, maxRetries = 3 } = params
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -381,11 +377,7 @@ async function saveSeriesMetadata(params: {
   }
 }
 
-async function linkBookToSeries(
-  bookId: string,
-  seriesId: Id<'series'>,
-  position: number | null
-): Promise<void> {
+async function linkBookToSeries(bookId: string, seriesId: Id<'series'>, position: number | null): Promise<void> {
   const convexUrl = process.env.CONVEX_URL
   if (!convexUrl) return
 
@@ -424,10 +416,10 @@ function printBookData(book: BookData): void {
     console.log(`  Series URL: ${book.seriesUrl ?? 'N/A'}`)
   }
 
-  if (book.lexileScore || book.ageRange || book.gradeLevel) {
+  if (book.lexileScore || book.ageRangeRaw || book.gradeLevelRaw) {
     console.log(`  Lexile: ${book.lexileScore ?? 'N/A'}`)
-    console.log(`  Age Range: ${book.ageRange ?? 'N/A'}`)
-    console.log(`  Grade Level: ${book.gradeLevel ?? 'N/A'}`)
+    console.log(`  Age Range: ${book.ageRangeRaw ?? 'N/A'}`)
+    console.log(`  Grade Level: ${book.gradeLevelRaw ?? 'N/A'}`)
   }
 
   if (book.description) {

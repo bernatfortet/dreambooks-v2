@@ -9,10 +9,10 @@
  */
 
 import { ConvexHttpClient } from 'convex/browser'
-import { api } from '../convex/_generated/api'
-import { parseSeriesFromPage } from '../lib/scraping/domains/series/parse'
-import { withBrowser } from '../lib/scraping/providers/playwright/browser'
-import { navigateWithRetry } from '../lib/scraping/providers/playwright/browser'
+import { api } from '@/convex/_generated/api'
+import { parseSeriesFromPage } from '@/lib/scraping/domains/series/parse'
+import { withBrowser } from '@/lib/scraping/providers/playwright/browser'
+import { navigateWithRetry } from '@/lib/scraping/providers/playwright/browser'
 
 const CONVEX_URL = process.env.CONVEX_URL || 'https://abundant-bee-200.convex.cloud'
 
@@ -24,9 +24,7 @@ async function main() {
     console.error('Usage: npx tsx scripts/add-series-to-book.ts <bookId> <seriesUrl>')
     console.error('')
     console.error('Example:')
-    console.error(
-      '  npx tsx scripts/add-series-to-book.ts j97fwxqp6xx0j6px43am7kzt4h7z4rdk "https://www.amazon.com/dp/B0CTHRGFF7"'
-    )
+    console.error('  npx tsx scripts/add-series-to-book.ts j97fwxqp6xx0j6px43am7kzt4h7z4rdk "https://www.amazon.com/dp/B0CTHRGFF7"')
     process.exit(1)
   }
 

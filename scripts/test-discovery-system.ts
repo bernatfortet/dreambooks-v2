@@ -2,19 +2,19 @@
 
 /**
  * Test script for unified discovery system.
- * 
+ *
  * Tests discovery extraction, queuing, and processor flows.
- * 
+ *
  * Usage:
  *   bunx tsx scripts/test-discovery-system.ts
  */
 
 import * as dotenv from 'dotenv'
-import { discoverBookLinks } from '../lib/scraping/domains/book/discover'
-import { discoverSeriesLinks } from '../lib/scraping/domains/series/discover'
-import { discoverAuthorLinks } from '../lib/scraping/domains/author/discover'
+import { discoverBookLinks } from '@/lib/scraping/domains/book/discover'
+import { discoverSeriesLinks } from '@/lib/scraping/domains/series/discover'
+import { discoverAuthorLinks } from '@/lib/scraping/domains/author/discover'
 import { getConvexClient, queueDiscoveries } from './worker/convex'
-import { api } from '../convex/_generated/api'
+import { api } from '@/convex/_generated/api'
 
 dotenv.config({ path: '.env.local' })
 dotenv.config()
@@ -25,6 +25,10 @@ const mockBookData = {
   subtitle: null,
   authors: ['Author One', 'Author Two'],
   amazonAuthorIds: ['B000APEZHY', 'B000APFZHY'],
+  contributors: [
+    { name: 'Author One', amazonAuthorId: 'B000APEZHY', role: 'author' as const },
+    { name: 'Author Two', amazonAuthorId: 'B000APFZHY', role: 'author' as const },
+  ],
   isbn10: null,
   isbn13: null,
   asin: 'B012345678',
@@ -33,13 +37,22 @@ const mockBookData = {
   pageCount: null,
   description: null,
   coverImageUrl: null,
+  coverWidth: null,
+  coverHeight: null,
+  coverSourceFormat: null,
+  coverSourceAsin: null,
   lexileScore: null,
-  ageRange: null,
-  gradeLevel: null,
+  ageRangeMin: null,
+  ageRangeMax: null,
+  ageRangeRaw: null,
+  gradeLevelMin: null,
+  gradeLevelMax: null,
+  gradeLevelRaw: null,
   seriesName: 'Test Series',
   seriesUrl: 'https://www.amazon.com/gp/series/B012345678',
   seriesPosition: 1,
   formats: [],
+  editions: [],
 }
 
 const mockSeriesData = {
@@ -54,8 +67,9 @@ const mockSeriesData = {
     amazonUrl: `https://www.amazon.com/dp/B${String(i).padStart(9, '0')}`,
     position: i + 1,
     coverImageUrl: null,
-    format: i % 5 === 0 ? 'audiobook' as const : 'paperback' as const,
+    format: i % 5 === 0 ? ('audiobook' as const) : ('paperback' as const),
     authors: ['Author One'],
+    authorLinks: [{ name: 'Author One', url: 'https://www.amazon.com/author/author-one' }],
   })),
   pagination: null,
 }
@@ -85,10 +99,10 @@ async function testDiscoveryExtraction() {
   console.log('Test 1.1: Book Discovery Extraction')
   const bookDiscoveries = discoverBookLinks(mockBookData)
   console.log(`   Found ${bookDiscoveries.length} discoveries`)
-  
+
   const seriesDiscovery = bookDiscoveries.find((d) => d.type === 'series')
   const authorDiscoveries = bookDiscoveries.filter((d) => d.type === 'author')
-  
+
   if (!seriesDiscovery) {
     console.error('   ❌ FAILED: No series discovery found')
     return false
@@ -111,7 +125,7 @@ async function testDiscoveryExtraction() {
   console.log('Test 1.2: Series Discovery Extraction (Capping)')
   const seriesDiscoveries = discoverSeriesLinks(mockSeriesData)
   console.log(`   Found ${seriesDiscoveries.length} discoveries (from ${mockSeriesData.books.length} books)`)
-  
+
   if (seriesDiscoveries.length > 50) {
     console.error(`   ❌ FAILED: Discoveries not capped (got ${seriesDiscoveries.length}, max 50)`)
     return false
@@ -132,11 +146,13 @@ async function testDiscoveryExtraction() {
   // Test 3: Author discovery (capping)
   console.log('Test 1.3: Author Discovery Extraction (Capping)')
   const authorPageDiscoveries = discoverAuthorLinks(mockAuthorData)
-  console.log(`   Found ${authorPageDiscoveries.length} discoveries (${mockAuthorData.series.length} series, ${mockAuthorData.books.length} books)`)
-  
+  console.log(
+    `   Found ${authorPageDiscoveries.length} discoveries (${mockAuthorData.series.length} series, ${mockAuthorData.books.length} books)`,
+  )
+
   const seriesDisc = authorPageDiscoveries.filter((d) => d.type === 'series')
   const bookDisc = authorPageDiscoveries.filter((d) => d.type === 'book')
-  
+
   if (seriesDisc.length > 20) {
     console.error(`   ❌ FAILED: Series discoveries not capped (got ${seriesDisc.length}, max 20)`)
     return false
@@ -184,7 +200,7 @@ async function testQueueIntegration() {
   // Test 2.2: Deduplication
   console.log('Test 2.2: Queue Deduplication')
   const testUrl = 'https://www.amazon.com/dp/B999999999'
-  
+
   // Add URL manually first
   await client.mutation(api.scrapeQueue.mutations.enqueue, {
     url: testUrl,

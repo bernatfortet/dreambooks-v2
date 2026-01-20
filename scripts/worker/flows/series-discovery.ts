@@ -1,7 +1,7 @@
 import type { Page } from 'playwright'
 
 import type { PageManager } from '../browser'
-import { humanDelay } from '../utils'
+import { humanDelay, startItemLog, finishItemLog, logError } from '../utils'
 import { fetchSeriesNeedingUrlDiscovery } from '../convex'
 import { discoverSeriesUrl } from '../processors/series-url'
 
@@ -41,8 +41,17 @@ export async function processSeriesDiscoveryFlow(params: {
 
     await humanDelay(2000, 4000, 'Preparing URL discovery')
 
-    const result = await discoverSeriesUrl({ series, page, dryRun })
-    if (result.success) workDone = true
+    startItemLog()
+    let success = false
+    try {
+      const result = await discoverSeriesUrl({ series, page, dryRun })
+      success = result.success
+      if (result.success) workDone = true
+    } catch (error) {
+      logError('   🚨 Series URL discovery crashed', error)
+    } finally {
+      finishItemLog('series', series.bookAmazonUrl, success)
+    }
 
     await humanDelay(5000, 10000, 'Waiting before next item')
   }

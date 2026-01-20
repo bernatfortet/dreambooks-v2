@@ -1,7 +1,7 @@
 import type { Page } from 'playwright'
 
 import type { PageManager } from '../browser'
-import { humanDelay } from '../utils'
+import { humanDelay, startItemLog, finishItemLog, logError } from '../utils'
 import { fetchBooksNeedingEnrichment } from '../convex'
 import { enrichBook } from '../processors/enrichment'
 
@@ -41,7 +41,16 @@ export async function processEnrichmentFlow(params: {
 
     await humanDelay(2000, 4000, 'Preparing next book')
 
-    const success = await enrichBook({ book, page, dryRun })
+    const url = book.amazonUrl ?? (book.asin ? `https://www.amazon.com/dp/${book.asin}` : 'unknown')
+    startItemLog()
+    let success = false
+    try {
+      success = await enrichBook({ book, page, dryRun })
+    } catch (error) {
+      logError('   🚨 Enrichment crashed', error)
+    } finally {
+      finishItemLog('enrichment', url, success)
+    }
     if (success) workDone = true
 
     await humanDelay(5000, 10000, 'Waiting before next item')

@@ -1,7 +1,7 @@
 import type { Page } from 'playwright'
 
 import type { PageManager } from '../browser'
-import { humanDelay } from '../utils'
+import { humanDelay, startItemLog, finishItemLog, log, logError } from '../utils'
 import { fetchSeriesNeedingScrape } from '../convex'
 import { processSeriesFromQueue } from '../processors/series'
 
@@ -50,7 +50,7 @@ export async function processSeriesScrapingFlow(params: {
     }
 
     if (series.scrapeStatus === 'partial') {
-      console.log(`   📄 Continuing pagination for: ${series.name}`)
+      log(`   📄 Continuing pagination for: ${series.name}`)
     }
 
     // Create a synthetic queue item for the processor
@@ -64,8 +64,17 @@ export async function processSeriesScrapingFlow(params: {
       createdAt: Date.now(),
     }
 
-    const result = await processSeriesFromQueue({ item, page, dryRun, seriesId: series._id })
-    if (result.success) workDone = true
+    startItemLog()
+    let success = false
+    try {
+      const result = await processSeriesFromQueue({ item, page, dryRun, seriesId: series._id })
+      success = result.success
+      if (result.success) workDone = true
+    } catch (error) {
+      logError('   🚨 Series scraping crashed', error)
+    } finally {
+      finishItemLog('series', url, success)
+    }
 
     await humanDelay(8000, 15000, 'Waiting before next item')
   }

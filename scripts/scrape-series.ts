@@ -9,9 +9,9 @@
  */
 
 import { ConvexHttpClient } from 'convex/browser'
-import { api, internal } from '../convex/_generated/api'
-import type { Id } from '../convex/_generated/dataModel'
-import { scrapeSeries } from '../lib/scraping/domains/series'
+import { api, internal } from '@/convex/_generated/api'
+import type { Id } from '@/convex/_generated/dataModel'
+import { scrapeSeries } from '@/lib/scraping/domains/series'
 
 const CONVEX_URL = process.env.CONVEX_URL || 'https://abundant-bee-200.convex.cloud'
 

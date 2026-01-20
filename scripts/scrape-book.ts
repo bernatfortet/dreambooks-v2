@@ -18,12 +18,12 @@ import * as dotenv from 'dotenv'
 import { writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 
-import { scrapeBook, BookData } from '../lib/scraping'
-import { scrapeSeries } from '../lib/scraping/domains/series'
+import { scrapeBook, BookData } from '@/lib/scraping'
+import { scrapeSeries } from '@/lib/scraping/domains/series'
 import { importBookToConvex } from './lib/convex-client'
 import { ConvexHttpClient } from 'convex/browser'
-import { api } from '../convex/_generated/api'
-import type { Id } from '../convex/_generated/dataModel'
+import { api } from '@/convex/_generated/api'
+import type { Id } from '@/convex/_generated/dataModel'
 
 // Load environment variables (.env.local takes precedence over .env)
 dotenv.config({ path: '.env.local' })
@@ -138,12 +138,7 @@ async function main() {
   }
 }
 
-async function scrapeSeriesFromBook(params: {
-  seriesUrl: string
-  seriesName: string
-  bookId: string
-  headless: boolean
-}) {
+async function scrapeSeriesFromBook(params: { seriesUrl: string; seriesName: string; bookId: string; headless: boolean }) {
   const { seriesUrl, seriesName, bookId, headless } = params
 
   const convexUrl = process.env.CONVEX_URL
@@ -311,10 +306,10 @@ function printBookData(data: BookData) {
     console.log(`  Series URL: ${data.seriesUrl ?? 'N/A'}`)
   }
 
-  if (data.lexileScore || data.ageRange || data.gradeLevel) {
+  if (data.lexileScore || data.ageRangeRaw || data.gradeLevelRaw) {
     console.log(`  Lexile: ${data.lexileScore ?? 'N/A'}`)
-    console.log(`  Age Range: ${data.ageRange ?? 'N/A'}`)
-    console.log(`  Grade Level: ${data.gradeLevel ?? 'N/A'}`)
+    console.log(`  Age Range: ${data.ageRangeRaw ?? 'N/A'}`)
+    console.log(`  Grade Level: ${data.gradeLevelRaw ?? 'N/A'}`)
   }
 
   if (data.description) {
@@ -349,11 +344,7 @@ function getOutputFileNameBase(params: { url: string; bookData: BookData }): str
 }
 
 function extractAmazonProductIdFromUrl(url: string): string | null {
-  const patterns = [
-    /\/dp\/([A-Z0-9]{10})/i,
-    /\/gp\/product\/([A-Z0-9]{10})/i,
-    /\/product\/([A-Z0-9]{10})/i,
-  ]
+  const patterns = [/\/dp\/([A-Z0-9]{10})/i, /\/gp\/product\/([A-Z0-9]{10})/i, /\/product\/([A-Z0-9]{10})/i]
 
   for (const pattern of patterns) {
     const match = url.match(pattern)
