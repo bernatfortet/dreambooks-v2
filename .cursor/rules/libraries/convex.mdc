@@ -1,6 +1,6 @@
 ---
 description: Convex-specific patterns, best practices, and conventions
-globs: ["convex/**/*.ts"]
+globs: ['convex/**/*.ts']
 alwaysApply: true
 ---
 
@@ -56,11 +56,13 @@ export const create = mutation({
 ## Function Types
 
 ### Public Functions (exposed to clients)
+
 - `query` - Read-only, reactive, can be called from client
 - `mutation` - Write operations, can be called from client
 - `action` - External calls, async operations, can be called from client
 
 ### Internal Functions (only callable from other Convex functions)
+
 - `internalQuery` - Read-only, called via `context.runQuery()`
 - `internalMutation` - Write operations, called via `context.runMutation()`
 - `internalAction` - External calls, called via `context.runAction()`
@@ -97,10 +99,7 @@ export const listPaginated = query({
     paginationOpts: paginationOptsValidator,
   },
   handler: async (context, args) => {
-    return await context.db
-      .query('books')
-      .order('desc')
-      .paginate(args.paginationOpts)
+    return await context.db.query('books').order('desc').paginate(args.paginationOpts)
   },
 })
 ```
@@ -112,7 +111,7 @@ export const listPaginated = query({
 If using Node.js built-ins (like `fs`, `http`, `crypto`), add `"use node";` at the top:
 
 ```typescript
-"use node"
+'use node'
 
 import { action } from '../_generated/server'
 import { v } from 'convex/values'
@@ -199,6 +198,45 @@ export const get = query({
 - Import `internal` from `../_generated/api` for internal function references
 - Import `api` from `../_generated/api` for public function references
 
+### Never Manually Define Types from Convex Queries
+
+**Always use `FunctionReturnType` to extract types from Convex queries/mutations instead of manually defining types.** This ensures types stay in sync with the actual Convex function return values.
+
+```typescript
+import type { FunctionReturnType } from 'convex/server'
+import { api } from '@/convex/_generated/api'
+
+// ✅ GOOD: Extract type from query return value (single value)
+type Book = NonNullable<FunctionReturnType<typeof api.books.queries.getBySlugOrId>>
+
+// ✅ GOOD: For array returns, extract element type (dot notation)
+type BookArray = NonNullable<FunctionReturnType<typeof api.books.queries.list>>
+type Book = BookArray[number]
+
+// ✅ GOOD: For slash-separated module paths, extract query function reference first
+// TypeScript doesn't support bracket notation for slash-separated module paths
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const editionsQueryRef = (api as any)['bookEditions/queries']['listByBookId']
+
+type EditionArray = NonNullable<FunctionReturnType<typeof editionsQueryRef>>
+type Edition = EditionArray[number]
+
+// ❌ BAD: Manually defining types
+type Book = {
+  _id: Id<'books'>
+  title: string
+  // ... manually listing all fields - this will get out of sync!
+}
+```
+
+**Rules:**
+
+- Use `FunctionReturnType<typeof api.module.queries.functionName>` for single return values
+- For array returns, first extract the array type, then use `[number]` to get the element type
+- Wrap with `NonNullable<>` if the query can return `null` or `undefined`
+- For slash-separated module paths (e.g., `bookEditions/queries`), create a helper type alias `type ApiAny = typeof api as any` first, then use `ApiAny['module/queries']['functionName']`
+- Always add an eslint-disable comment when using `as any` for slash-separated paths
+
 ## Common Patterns
 
 ### Upsert Pattern
@@ -225,9 +263,7 @@ export const upsert = internalMutation({
 ```typescript
 const booksWithUrls = await Promise.all(
   books.map(async (book) => {
-    const coverUrl = book.coverStorageId
-      ? await context.storage.getUrl(book.coverStorageId)
-      : null
+    const coverUrl = book.coverStorageId ? await context.storage.getUrl(book.coverStorageId) : null
     return { ...book, coverUrl }
   }),
 )
