@@ -5,13 +5,7 @@ import { useMutation } from 'convex/react'
 import { api } from '@/convex/_generated/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 type UrlType = 'auto' | 'book' | 'series'
 
@@ -41,13 +35,27 @@ export function BookSubmitForm({ url, onUrlChange }: BookSubmitFormProps) {
       // Use manual type if specified, otherwise auto-detect
       const type = urlType === 'auto' ? detectUrlType(url.trim()) : urlType
 
-      await enqueueUrl({
+      const result = await enqueueUrl({
         url: url.trim(),
         type,
         scrapeFullSeries: true,
         source: 'user',
+        referrerUrl: typeof window !== 'undefined' ? window.location.href : undefined,
+        referrerReason: 'manual',
       })
 
+      // Handle different result statuses
+      if (result.status === 'blocked') {
+        setError('This URL is blocked from being queued')
+        return
+      }
+
+      if (result.status === 'skipped_up_to_date') {
+        setError('This item already exists and is up-to-date')
+        return
+      }
+
+      // queued or already_queued - both are success states
       setSuccess(true)
       onUrlChange('')
       setUrlType('auto')
@@ -64,39 +72,35 @@ export function BookSubmitForm({ url, onUrlChange }: BookSubmitFormProps) {
   const detectedType = detectUrlType(url.trim())
 
   return (
-    <div className="space-y-2">
-      <form onSubmit={handleSubmit} className="flex gap-2">
+    <div className='space-y-2'>
+      <form onSubmit={handleSubmit} className='flex gap-2'>
         <Input
-          type="url"
-          placeholder="Enter Amazon URL (book or series)"
+          type='url'
+          placeholder='Enter Amazon URL (book or series)'
           value={url}
           onChange={(e) => onUrlChange(e.target.value)}
           disabled={isLoading}
-          className="flex-1"
+          className='flex-1'
         />
 
         <Select value={urlType} onValueChange={(value) => setUrlType(value as UrlType)}>
-          <SelectTrigger className="w-[120px]">
+          <SelectTrigger className='w-[120px]'>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="auto">Auto ({detectedType})</SelectItem>
-            <SelectItem value="book">Book</SelectItem>
-            <SelectItem value="series">Series</SelectItem>
+            <SelectItem value='auto'>Auto ({detectedType})</SelectItem>
+            <SelectItem value='book'>Book</SelectItem>
+            <SelectItem value='series'>Series</SelectItem>
           </SelectContent>
         </Select>
 
-        <Button type="submit" disabled={isLoading || !url.trim()}>
+        <Button type='submit' disabled={isLoading || !url.trim()}>
           {isLoading ? 'Adding...' : 'Add'}
         </Button>
       </form>
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
-      {success && (
-        <p className="text-sm text-green-600">
-          ✅ Added to queue. The worker will process it shortly.
-        </p>
-      )}
+      {error && <p className='text-sm text-red-500'>{error}</p>}
+      {success && <p className='text-sm text-green-600'>✅ Added to queue. The worker will process it shortly.</p>}
     </div>
   )
 }
@@ -106,11 +110,7 @@ function detectUrlType(url: string): 'book' | 'series' {
   // - ?series=XXXXXXXXXX
   // - /gp/series/XXXXXXXXXX
   // - /kindle-dbs/series?...&asin=XXXXXXXXXX
-  const seriesPatterns = [
-    /[?&]series=([A-Z0-9]+)/i,
-    /\/gp\/series\/([A-Z0-9]+)/i,
-    /\/kindle-dbs\/series/i,
-  ]
+  const seriesPatterns = [/[?&]series=([A-Z0-9]+)/i, /\/gp\/series\/([A-Z0-9]+)/i, /\/kindle-dbs\/series/i]
 
   for (const pattern of seriesPatterns) {
     if (pattern.test(url)) {

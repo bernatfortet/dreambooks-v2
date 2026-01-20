@@ -3,25 +3,18 @@
 import { useQuery } from 'convex/react'
 import { api } from '@/convex/_generated/api'
 import { Badge } from '@/components/ui/badge'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import Link from 'next/link'
 
 export function SeriesList() {
   const seriesList = useQuery(api.series.queries.list)
 
   if (seriesList === undefined) {
-    return <p className="text-muted-foreground">Loading series...</p>
+    return <p className='text-muted-foreground'>Loading series...</p>
   }
 
   if (seriesList.length === 0) {
-    return <p className="text-muted-foreground">No series yet.</p>
+    return <p className='text-muted-foreground'>No series yet.</p>
   }
 
   return (
@@ -35,10 +28,10 @@ export function SeriesList() {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {seriesList.map((series: typeof seriesList[number]) => (
+        {seriesList.map((series: (typeof seriesList)[number]) => (
           <TableRow key={series._id}>
             <TableCell>
-              <Link href={`/ad/series/${series._id}`} className="text-blue-500 hover:underline font-medium">
+              <Link href={`/series/${series.slug ?? series._id}`} className='text-blue-500 hover:underline font-medium'>
                 {series.name}
               </Link>
             </TableCell>
@@ -62,11 +55,7 @@ export function SeriesList() {
   )
 }
 
-function BookCountBadge(props: {
-  expected?: number
-  discovered?: number
-  scraped?: number
-}) {
+function BookCountBadge(props: { expected?: number; discovered?: number; scraped?: number }) {
   const { expected, discovered, scraped } = props
   const parts: string[] = []
 
@@ -74,9 +63,9 @@ function BookCountBadge(props: {
   if (discovered !== undefined) parts.push(`${discovered} discovered`)
   if (expected !== undefined) parts.push(`${expected} expected`)
 
-  if (parts.length === 0) return <span className="text-muted-foreground">-</span>
+  if (parts.length === 0) return <span className='text-muted-foreground'>-</span>
 
-  return <span className="text-sm">{parts.join(' / ')}</span>
+  return <span className='text-sm'>{parts.join(' / ')}</span>
 }
 
 function CompletenessBadge(props: { completeness: string }) {
@@ -86,11 +75,7 @@ function CompletenessBadge(props: { completeness: string }) {
     unknown: 'outline',
   }
 
-  return (
-    <Badge variant={variants[props.completeness] ?? 'outline'}>
-      {props.completeness}
-    </Badge>
-  )
+  return <Badge variant={variants[props.completeness] ?? 'outline'}>{props.completeness}</Badge>
 }
 
 function StatusBadge(props: { status: string }) {
@@ -102,9 +87,5 @@ function StatusBadge(props: { status: string }) {
     error: 'destructive',
   }
 
-  return (
-    <Badge variant={variants[props.status] ?? 'outline'}>
-      {props.status}
-    </Badge>
-  )
+  return <Badge variant={variants[props.status] ?? 'outline'}>{props.status}</Badge>
 }

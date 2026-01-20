@@ -1,23 +1,84 @@
 'use client'
 
-import Link from 'next/link'
-import Image from 'next/image'
+import type { ReactNode } from 'react'
 import { usePaginatedQuery } from 'convex/react'
 import { api } from '@/convex/_generated/api'
 import { Button } from '@/components/ui/button'
+import { BookCard } from '@/components/books/BookCard'
+import { Id } from '@/convex/_generated/dataModel'
+import type { BookFilters } from './filters/types'
 
-export function BookGrid() {
-  const { results, status, loadMore } = usePaginatedQuery(
-    api.books.queries.listPaginated,
-    {},
-    { initialNumItems: 24 },
-  ) as {
-    results: Array<{
-      _id: string
-      title: string
-      authors: string[]
-      coverUrl: string | null
-    }>
+type BookItem = {
+  _id: string
+  slug?: string | null
+  title: string
+  authors: string[]
+  coverUrl: string | null
+  seriesPosition?: number | null
+}
+
+const BOOK_GRID_CLASSES = 'grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3'
+
+type BookGridContainerProps = {
+  children: React.ReactNode
+  className?: string
+}
+
+export function BookGridContainer({ children, className }: BookGridContainerProps) {
+  return <div className={`${BOOK_GRID_CLASSES} ${className ?? ''}`}>{children}</div>
+}
+
+type BookGridListProps = {
+  books: BookItem[]
+  className?: string
+}
+
+export function BookGridList({ books, className }: BookGridListProps) {
+  if (books.length === 0) {
+    return <p className='text-center text-muted-foreground py-12'>No books yet.</p>
+  }
+
+  return (
+    <BookGridContainer className={className}>
+      {books.map((book) => (
+        <BookCard
+          key={book._id}
+          slug={book.slug ?? book._id}
+          title={book.title}
+          authors={book.authors}
+          coverUrl={book.coverUrl}
+          seriesPosition={book.seriesPosition}
+        />
+      ))}
+    </BookGridContainer>
+  )
+}
+
+type BookGridProps = {
+  filters?: BookFilters
+}
+
+export function BookGrid({ filters }: BookGridProps) {
+  const hasFilters = filters && Object.keys(filters).some((key) => filters[key as keyof BookFilters] !== undefined)
+
+  const queryArgs = hasFilters
+    ? {
+        filters: {
+          ...(filters.ageRangeBuckets && filters.ageRangeBuckets.length > 0 && { ageRangeBuckets: filters.ageRangeBuckets }),
+          ...(filters.gradeLevelBuckets && filters.gradeLevelBuckets.length > 0 && { gradeLevelBuckets: filters.gradeLevelBuckets }),
+          ...(filters.awardIds &&
+            filters.awardIds.length > 0 && {
+              awardIds: filters.awardIds as Id<'awards'>[],
+            }),
+          ...(filters.seriesFilter && filters.seriesFilter !== 'all' && { seriesFilter: filters.seriesFilter }),
+        },
+      }
+    : {}
+
+  const query = hasFilters ? api.books.queries.listPaginatedWithFilters : api.books.queries.listPaginated
+
+  const { results, status, loadMore } = usePaginatedQuery(query as any, queryArgs, { initialNumItems: 24 }) as {
+    results: BookItem[]
     status: 'LoadingFirstPage' | 'LoadingMore' | 'CanLoadMore' | 'Exhausted'
     loadMore: (numItems: number) => void
   }
@@ -26,92 +87,41 @@ export function BookGrid() {
     return <BookGridSkeleton />
   }
 
-  if (results.length === 0) {
-    return (
-      <p className="text-center text-muted-foreground py-12">
-        No books yet.
-      </p>
-    )
-  }
-
   return (
-    <div className="space-y-8">
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-        {results.map((book) => (
-          <BookGridItem
-            key={book._id}
-            id={book._id}
-            title={book.title}
-            authors={book.authors}
-            coverUrl={book.coverUrl}
-          />
-        ))}
-      </div>
+    <div className='space-y-8'>
+      <BookGridList books={results} />
 
       {status === 'CanLoadMore' && (
-        <div className="flex justify-center">
-          <Button variant="outline" onClick={() => loadMore(24)}>
+        <div className='flex justify-center'>
+          <Button variant='outline' onClick={() => loadMore(24)}>
             Load more
           </Button>
         </div>
       )}
 
       {status === 'LoadingMore' && (
-        <div className="flex justify-center">
-          <p className="text-muted-foreground">Loading...</p>
+        <div className='flex justify-center'>
+          <p className='text-muted-foreground'>Loading...</p>
         </div>
       )}
     </div>
   )
 }
 
-type BookGridItemProps = {
-  id: string
-  title: string
-  authors: string[]
-  coverUrl: string | null
+type BookGridSkeletonProps = {
+  count?: number
 }
 
-function BookGridItem({ id, title, authors, coverUrl }: BookGridItemProps) {
+export function BookGridSkeleton({ count = 12 }: BookGridSkeletonProps) {
   return (
-    <Link href={`/books/${id}`} className="group block">
-      <div className="aspect-[2/3] relative bg-muted rounded-lg overflow-hidden mb-2">
-        {coverUrl ? (
-          <Image
-            src={coverUrl}
-            alt={title}
-            fill
-            className="object-cover group-hover:scale-105 transition-transform duration-200"
-            sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, 16vw"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-muted-foreground text-sm p-4 text-center">
-            {title}
-          </div>
-        )}
-      </div>
-
-      <h3 className="font-medium text-sm line-clamp-2 group-hover:text-primary transition-colors">
-        {title}
-      </h3>
-
-      <p className="text-xs text-muted-foreground line-clamp-1">
-        {authors.join(', ')}
-      </p>
-    </Link>
-  )
-}
-
-function BookGridSkeleton() {
-  return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-      {Array.from({ length: 12 }).map((_, index) => (
-        <div key={index} className="space-y-2">
-          <div className="aspect-[2/3] bg-muted rounded-lg animate-pulse" />
-          <div className="h-4 bg-muted rounded animate-pulse w-3/4" />
-          <div className="h-3 bg-muted rounded animate-pulse w-1/2" />
+    <BookGridContainer>
+      {Array.from({ length: count }).map((_, index) => (
+        <div key={index} className='space-y-2'>
+          <div className='aspect-2/3 bg-muted rounded-md animate-pulse' />
+          <div className='h-4 bg-muted rounded animate-pulse w-3/4' />
+          <div className='h-3 bg-muted rounded animate-pulse w-1/2' />
         </div>
       ))}
-    </div>
+    </BookGridContainer>
   )
 }
