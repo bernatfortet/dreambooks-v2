@@ -16,7 +16,7 @@ export type ScrapeResult<T> =
 export type Discovery = {
   type: 'book' | 'series' | 'author'
   url: string
-  metadata?: { name?: string; position?: number }
+  metadata?: { name?: string; imageUrl?: string; position?: number }
   priority: number // Lower = higher priority
   source: string // Where discovered: 'book-series-link', 'series-listing', 'author-page', etc.
 }

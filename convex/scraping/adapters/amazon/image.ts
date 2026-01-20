@@ -34,6 +34,34 @@ export function toHighResAmazonImageUrl(url: string): string {
   return highResUrl
 }
 
+/**
+ * Transform Amazon image URL to medium resolution (522px height).
+ * Good for grids and list views where full resolution is overkill.
+ */
+export function toMediumResAmazonImageUrl(url: string): string {
+  if (!url) return url
+
+  // Check if it's an Amazon image URL
+  if (!url.includes('media-amazon.com/images')) return url
+
+  // Replace any size suffix with _SY522_ for medium resolution
+  return url.replace(AMAZON_IMAGE_SIZE_PATTERN, '._SY522_.')
+}
+
+/**
+ * Transform Amazon image URL to thumbnail resolution (100px height).
+ * Good for small thumbnails in grids and compact lists.
+ */
+export function toThumbResAmazonImageUrl(url: string): string {
+  if (!url) return url
+
+  // Check if it's an Amazon image URL
+  if (!url.includes('media-amazon.com/images')) return url
+
+  // Replace any size suffix with _SY100_ for thumbnail resolution
+  return url.replace(AMAZON_IMAGE_SIZE_PATTERN, '._SY100_.')
+}
+
 export function toOriginalAmazonImageUrl(url: string): string {
   if (!url) return url
 

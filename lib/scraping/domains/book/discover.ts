@@ -1,7 +1,7 @@
 import type { BookData } from './types'
-import type { Discovery } from '../../types'
-import { buildAuthorUrl } from '../../utils/amazon-url'
-import { toSlug } from '../../utils/slug'
+import type { Discovery } from '@/lib/scraping/types'
+import { buildAuthorUrl } from '@/lib/scraping/utils/amazon-url'
+import { toSlug } from '@/lib/scraping/utils/slug'
 
 /**
  * Extract discoveries from parsed book data.
@@ -25,14 +25,14 @@ export function discoverBookLinks(data: BookData): Discovery[] {
   // Names and IDs should be in the same order from extraction
   const authorIds = data.amazonAuthorIds ?? []
   const authorNames = data.authors ?? []
-  
+
   for (let i = 0; i < authorIds.length; i++) {
     const authorId = authorIds[i]
     const authorName = authorNames[i] // May be undefined if arrays don't match
-    
+
     // Build URL with slug from author name if available
     const slug = authorName ? toSlug(authorName) : null
-    
+
     discoveries.push({
       type: 'author',
       url: buildAuthorUrl(authorId, slug),

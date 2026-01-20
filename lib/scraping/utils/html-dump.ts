@@ -1,17 +1,13 @@
 import type { Page } from 'playwright'
 import { writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
-import { SCRAPING_CONFIG } from '../config'
+import { SCRAPING_CONFIG } from '@/lib/scraping/config'
 
 /**
  * Dump page HTML to disk for debugging selector issues.
  * Creates timestamped HTML files that can be inspected offline.
  */
-export async function dumpPageHtml(
-  page: Page,
-  label: string,
-  options?: { includeOuterHtml?: boolean }
-): Promise<string | null> {
+export async function dumpPageHtml(page: Page, label: string, options?: { includeOuterHtml?: boolean }): Promise<string | null> {
   if (!SCRAPING_CONFIG.debug.dumpHtml) {
     return null
   }
@@ -29,7 +25,10 @@ export async function dumpPageHtml(
     // Get the HTML content
     const html = options?.includeOuterHtml
       ? await page.content()
-      : await page.locator('body').innerHTML().catch(() => page.content())
+      : await page
+          .locator('body')
+          .innerHTML()
+          .catch(() => page.content())
 
     // Add metadata header
     const metadata = `<!--
@@ -57,7 +56,7 @@ export async function dumpPageHtml(
 export async function quickText(
   page: Page,
   selector: string,
-  timeoutMs = SCRAPING_CONFIG.extraction.textContentTimeoutMs
+  timeoutMs = SCRAPING_CONFIG.extraction.textContentTimeoutMs,
 ): Promise<string | null> {
   try {
     const element = page.locator(selector).first()
@@ -77,7 +76,7 @@ export async function quickAttr(
   page: Page,
   selector: string,
   attribute: string,
-  timeoutMs = SCRAPING_CONFIG.extraction.attributeTimeoutMs
+  timeoutMs = SCRAPING_CONFIG.extraction.attributeTimeoutMs,
 ): Promise<string | null> {
   try {
     const element = page.locator(selector).first()

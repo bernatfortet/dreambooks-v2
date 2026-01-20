@@ -44,12 +44,7 @@ function extractAmazonAuthorIdFromUrl(url: string): string | null {
 }
 
 async function extractAuthorName(page: Page): Promise<string | null> {
-  const selectors = [
-    'h1.a-size-extra-large',
-    'h1[class*="author"]',
-    '.a-profile-descriptor',
-    'h1',
-  ]
+  const selectors = ['h1.a-size-extra-large', 'h1[class*="author"]', '.a-profile-descriptor', 'h1']
 
   for (const selector of selectors) {
     try {
@@ -137,27 +132,60 @@ async function extractBio(page: Page): Promise<string | null> {
 }
 
 async function extractProfileImage(page: Page): Promise<string | null> {
+  console.log('   🔍 Looking for profile image...')
+
+  // Scroll to top to ensure header is visible
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.waitForTimeout(1000)
+
+  // More specific selectors for actual author profile pictures
+  // Note: Many authors don't have profile pictures - Amazon shows placeholders or banners
+  // Priority: Most specific profile image selectors first
   const selectors = [
+    // Amazon author page - profile image (Playwright sees different structure)
+    'img[alt$="profile image"]', // alt ends with "profile image"
+    'img[class*="authorImage"]', // class contains "authorImage"
+    'img[class*="_author-header-card"]', // author header card style
+    // Desktop header structure (when available)
+    '[data-testid="header-logo-section"] img[data-testid="image"]',
+    '[data-testid="header-logo-section"] img',
+    'img[alt*="Visit"][alt*="Store on Amazon"]',
+    '[data-testid="header-nav-area"] img[data-testid="image"]',
+    '[class*="Header__author-logo"] img',
+    '[class*="Header__leftColumn"] img',
+    // Older Amazon author page formats
     '.a-profile-avatar img',
     '.author-image img',
     'img[data-testid="author-image"]',
     '.apb-browse-searchresults-about-author-image img',
-    'img[alt*="author"]',
+    '[class*="AuthorImage"] img',
+    // Generic circle image (fallback - may match wrong image)
+    'img[class*="Image__circle"]',
   ]
 
   for (const selector of selectors) {
     try {
       const img = page.locator(selector).first()
-      const isVisible = await img.isVisible({ timeout: 500 }).catch(() => false)
+      // Longer timeout for header elements which may load slower
+      const timeout = selector.includes('header') || selector.includes('Header') ? 2000 : 500
+      const isVisible = await img.isVisible({ timeout }).catch(() => false)
 
       if (isVisible) {
+        const src = await img.getAttribute('src')
+
+        // Skip if not a valid author image
+        if (!src || !isValidAuthorImageUrl(src)) {
+          continue
+        }
+
         // Try data-a-dynamic-image first (contains multiple sizes)
         const dynamicImage = await img.getAttribute('data-a-dynamic-image')
         if (dynamicImage) {
           try {
             const imageMap = JSON.parse(dynamicImage) as Record<string, unknown>
             const urls = Object.keys(imageMap)
-            const largest = urls.sort((a, b) => extractImageSize(b) - extractImageSize(a))[0]
+            const validUrls = urls.filter((url) => isValidAuthorImageUrl(url))
+            const largest = validUrls.sort((a, b) => extractImageSize(b) - extractImageSize(a))[0]
             if (largest) {
               console.log(`   Found profile image (dynamic): ${largest.substring(0, 60)}...`)
               return upgradeImageUrl(largest)
@@ -167,19 +195,49 @@ async function extractProfileImage(page: Page): Promise<string | null> {
           }
         }
 
-        // Fallback to src
-        const src = await img.getAttribute('src')
-        if (src && !src.includes('data:')) {
-          console.log(`   Found profile image: ${src.substring(0, 60)}...`)
-          return upgradeImageUrl(src)
-        }
+        // Use src directly
+        console.log(`   Found profile image: ${src.substring(0, 60)}...`)
+        return upgradeImageUrl(src)
       }
     } catch {
       continue
     }
   }
 
+  console.log('   No profile image found')
   return null
+}
+
+function isValidAuthorImageUrl(url: string): boolean {
+  if (!url) return false
+
+  // Filter out data URIs
+  if (url.startsWith('data:')) return false
+
+  // Filter out known Amazon banner/placeholder images
+  const invalidPatterns = [
+    'Author_Store_Banner',
+    'author-cx',
+    'grey-pixel',
+    'transparent-pixel',
+    'amazon-avatars-global/default',
+    '/G/01/', // Amazon UI assets path
+  ]
+
+  for (const pattern of invalidPatterns) {
+    if (url.includes(pattern)) {
+      console.log(`   Skipping invalid image URL (matches ${pattern}): ${url.substring(0, 60)}...`)
+      return false
+    }
+  }
+
+  // Must be an actual image URL (usually from media-amazon.com/images/I/)
+  if (!url.includes('media-amazon.com/images/I/')) {
+    console.log(`   Skipping non-product image URL: ${url.substring(0, 60)}...`)
+    return false
+  }
+
+  return true
 }
 
 async function extractSeries(page: Page): Promise<AuthorSeriesEntry[]> {
@@ -191,10 +249,7 @@ async function extractSeries(page: Page): Promise<AuthorSeriesEntry[]> {
   await autoScroll(page)
 
   // Find series links - they typically contain /series/ in the URL
-  const seriesSelectors = [
-    'a[href*="/series/"]',
-    'a[href*="dp/"][title*="Series"]',
-  ]
+  const seriesSelectors = ['a[href*="/series/"]', 'a[href*="dp/"][title*="Series"]']
 
   for (const selector of seriesSelectors) {
     try {
@@ -212,7 +267,10 @@ async function extractSeries(page: Page): Promise<AuthorSeriesEntry[]> {
 
           // Try to find book count from nearby text
           let bookCount: number | null = null
-          const parentText = await link.locator('..').textContent().catch(() => null)
+          const parentText = await link
+            .locator('..')
+            .textContent()
+            .catch(() => null)
           if (parentText) {
             const countMatch = parentText.match(/(\d+)\s*books?/i)
             if (countMatch) bookCount = parseInt(countMatch[1], 10)
@@ -242,11 +300,7 @@ async function extractBooks(page: Page): Promise<AuthorBookEntry[]> {
   const seenAsins = new Set<string>()
 
   // Find book items
-  const bookSelectors = [
-    '[data-asin]:has(a[href*="/dp/"])',
-    '.a-carousel-card:has(a[href*="/dp/"])',
-    'a[href*="/dp/"][data-asin]',
-  ]
+  const bookSelectors = ['[data-asin]:has(a[href*="/dp/"])', '.a-carousel-card:has(a[href*="/dp/"])', 'a[href*="/dp/"][data-asin]']
 
   for (const selector of bookSelectors) {
     try {
@@ -315,7 +369,7 @@ async function extractBooks(page: Page): Promise<AuthorBookEntry[]> {
           if (!asin || seenAsins.has(asin)) continue
           seenAsins.add(asin)
 
-          const title = await link.getAttribute('title') ?? await link.textContent()
+          const title = (await link.getAttribute('title')) ?? (await link.textContent())
 
           books.push({
             title: title?.trim() ?? null,

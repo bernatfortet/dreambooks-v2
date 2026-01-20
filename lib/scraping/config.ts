@@ -3,6 +3,40 @@
  * All magic numbers and tunable constants should be defined here.
  */
 
+/**
+ * Scrape Version Guidelines
+ * -------------------------
+ * Bump the version when:
+ *   - Adding new fields that provide meaningful data (e.g., lexile scores, age ranges)
+ *   - Fixing extraction bugs that caused missing or incorrect data
+ *   - Improving parsing logic that produces better quality results
+ *   - Changing field normalization (e.g., cleaner titles, better author extraction)
+ *
+ * DON'T bump for:
+ *   - Internal refactors that don't change output data
+ *   - Performance optimizations
+ *   - Code cleanup or style changes
+ *   - Adding optional fields that are rarely populated
+ *
+ * Re-scrape Strategy:
+ *   - Query entities where scrapeVersion < CURRENT_VERSION
+ *   - Prioritize entities with oldest scrapeVersion first
+ *   - Consider rate limiting to avoid overwhelming sources
+ *
+ * IMPORTANT: Keep in sync with convex/lib/scrapeVersions.ts
+ * (lib/ runs locally, convex/ runs on Convex servers - can't share files)
+ */
+export const SCRAPE_VERSIONS = {
+  /** Version of the book scraping/parsing logic */
+  book: 1,
+  /** Version of the series scraping/parsing logic */
+  series: 2, // v2: store canonical sourceUrl on re-scrape
+  /** Version of the author scraping/parsing logic */
+  author: 1,
+} as const
+
+export type ScrapeVersions = typeof SCRAPE_VERSIONS
+
 export const SCRAPING_CONFIG = {
   queue: {
     /** Maximum discoveries to process per mutation call (prevents queue floods) */
@@ -35,6 +69,8 @@ export const SCRAPING_CONFIG = {
     seriesDiscoveryBatchSize: 2,
     /** Maximum series to fetch for scraping */
     seriesScrapingBatchSize: 2,
+    /** Maximum entities to queue for version upgrade per poll */
+    versionUpgradeBatchSize: 3,
   },
   navigation: {
     /** Maximum retries for page navigation */

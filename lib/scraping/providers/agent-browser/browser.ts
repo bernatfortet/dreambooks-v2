@@ -1,5 +1,5 @@
 import { chromium, Browser, Page, BrowserContext } from 'playwright'
-import { ScrapeResult } from '../../types'
+import { ScrapeResult } from '@/lib/scraping/types'
 
 const DEFAULT_CDP_URL = 'http://localhost:9222'
 
@@ -54,10 +54,7 @@ async function connectToBrowser(config?: CdpConfig): Promise<ConnectedBrowser> {
  * Execute an action on a browser connected via CDP.
  * This preserves the browser session (doesn't close it) since it's user-controlled.
  */
-export async function withCdpBrowser<T>(params: {
-  config?: CdpConfig
-  action: (page: Page) => Promise<T>
-}): Promise<ScrapeResult<T>> {
+export async function withCdpBrowser<T>(params: { config?: CdpConfig; action: (page: Page) => Promise<T> }): Promise<ScrapeResult<T>> {
   const { config, action } = params
 
   try {
@@ -78,10 +75,7 @@ export async function withCdpBrowser<T>(params: {
  * Connect to CDP browser and use a NEW tab for the action.
  * The new tab is closed after the action completes.
  */
-export async function withCdpNewTab<T>(params: {
-  config?: CdpConfig
-  action: (page: Page) => Promise<T>
-}): Promise<ScrapeResult<T>> {
+export async function withCdpNewTab<T>(params: { config?: CdpConfig; action: (page: Page) => Promise<T> }): Promise<ScrapeResult<T>> {
   const { config, action } = params
   let newPage: Page | null = null
 
@@ -109,12 +103,7 @@ export async function withCdpNewTab<T>(params: {
   }
 }
 
-export async function navigateWithRetry(params: {
-  page: Page
-  url: string
-  maxRetries?: number
-  waitMs?: number
-}): Promise<void> {
+export async function navigateWithRetry(params: { page: Page; url: string; maxRetries?: number; waitMs?: number }): Promise<void> {
   const { page, url, maxRetries = 3, waitMs = 2000 } = params
 
   let lastError: Error | null = null

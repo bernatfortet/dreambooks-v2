@@ -1,5 +1,5 @@
 import type { AuthorData } from './types'
-import type { Discovery } from '../../types'
+import type { Discovery } from '@/lib/scraping/types'
 
 /**
  * Extract discoveries from parsed author data.
@@ -33,7 +33,10 @@ export function discoverAuthorLinks(data: AuthorData): Discovery[] {
       discoveries.push({
         type: 'book',
         url: book.amazonUrl,
-        metadata: { name: book.title ?? undefined },
+        metadata: {
+          name: book.title ?? undefined,
+          imageUrl: book.coverImageUrl ?? undefined,
+        },
         priority: 35,
         source: 'author-page',
       })

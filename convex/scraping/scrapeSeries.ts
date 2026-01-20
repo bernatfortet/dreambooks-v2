@@ -2,6 +2,7 @@ import { action } from '../_generated/server'
 import { internal } from '../_generated/api'
 import { v } from 'convex/values'
 import { extractAsin } from './adapters/amazon/url'
+import { SCRAPE_VERSIONS } from '../lib/scrapeVersions'
 
 // Note: scrapeDiscovery action has been removed.
 // Book scraping is now handled via the unified scrapeQueue system.
@@ -55,10 +56,7 @@ export const scrapeSeries = action({
 
     try {
       // Call the Amazon adapter
-      const data = await context.runAction(
-        internal.scraping.adapters.amazon.series.crawlSeriesWithAmazon,
-        { url: urlToScrape }
-      )
+      const data = await context.runAction(internal.scraping.adapters.amazon.series.crawlSeriesWithAmazon, { url: urlToScrape })
 
       if (!data.seriesName || !data.books?.length) {
         throw new Error('Invalid series data: missing name or books')
@@ -111,7 +109,16 @@ export const scrapeSeries = action({
         lastScrapedPage: data.pagination?.currentPage,
         totalPages: data.pagination?.totalPages,
         nextPageUrl: data.pagination?.nextPageUrl,
+        scrapeVersion: SCRAPE_VERSIONS.series,
       })
+
+      // Schedule series cover download if available
+      if (data.coverImageUrl) {
+        await context.scheduler.runAfter(0, internal.scraping.downloadSeriesCover.downloadSeriesCover, {
+          seriesId: args.seriesId,
+          sourceUrl: data.coverImageUrl,
+        })
+      }
 
       // Complete the scrape run
       await context.runMutation(internal.series.mutations.completeScrapeRun, {

@@ -23,12 +23,7 @@
 export function extractAsin(url: string): string | null {
   if (!url) return null
 
-  const patterns = [
-    /\/dp\/([A-Z0-9]{10})/i,
-    /\/gp\/product\/([A-Z0-9]{10})/i,
-    /\/gp\/aw\/d\/([A-Z0-9]{10})/i,
-    /\/series\/([A-Z0-9]{10})/i,
-  ]
+  const patterns = [/\/dp\/([A-Z0-9]{10})/i, /\/gp\/product\/([A-Z0-9]{10})/i, /\/gp\/aw\/d\/([A-Z0-9]{10})/i, /\/series\/([A-Z0-9]{10})/i]
 
   for (const pattern of patterns) {
     const match = url.match(pattern)
@@ -63,11 +58,7 @@ export const extractAsinFromUrl = extractAsin
 export function extractAuthorId(url: string): string | null {
   if (!url) return null
 
-  const patterns = [
-    /\/e\/([A-Z0-9]+)/i,
-    /\/author\/([A-Z0-9]+)/i,
-    /\/stores\/author\/([A-Z0-9]+)/i,
-  ]
+  const patterns = [/\/e\/([A-Z0-9]+)/i, /\/author\/([A-Z0-9]+)/i, /\/stores\/author\/([A-Z0-9]+)/i]
 
   for (const pattern of patterns) {
     const match = url.match(pattern)
@@ -88,11 +79,7 @@ export function extractAuthorId(url: string): string | null {
 export function extractSeriesId(url: string): string | null {
   if (!url) return null
 
-  const patterns = [
-    /[?&]series=([A-Z0-9]+)/i,
-    /\/gp\/series\/([A-Z0-9]+)/i,
-    /\/kindle-dbs\/series.*[?&]asin=([A-Z0-9]+)/i,
-  ]
+  const patterns = [/[?&]series=([A-Z0-9]+)/i, /\/gp\/series\/([A-Z0-9]+)/i, /\/kindle-dbs\/series.*[?&]asin=([A-Z0-9]+)/i]
 
   for (const pattern of patterns) {
     const match = url.match(pattern)
@@ -149,6 +136,7 @@ export function extractAmazonSlug(url: string): string | null {
  * - Strips query parameters (except essential ones)
  * - Normalizes to www.amazon.com
  * - Cleans up any ref/tracking parameters from the path
+ * - Normalizes author URL slugs to lowercase
  */
 export function normalizeAmazonUrl(url: string): string {
   if (!url) return url
@@ -163,6 +151,15 @@ export function normalizeAmazonUrl(url: string): string {
     // Remove ref parameters from path (e.g., /ref=xxx at the end)
     pathname = pathname.replace(/\/ref=[^/]*$/, '')
 
+    // Normalize author URL slugs to lowercase
+    // Pattern: /Slug-Name/e/AUTHORID → /slug-name/e/AUTHORID
+    const authorMatch = pathname.match(/^\/([^/]+)\/e\/([A-Z0-9]+)$/i)
+    if (authorMatch) {
+      const slug = authorMatch[1].toLowerCase()
+      const authorId = authorMatch[2].toUpperCase()
+      pathname = `/${slug}/e/${authorId}`
+    }
+
     // Normalize to www.amazon.com
     return `https://www.amazon.com${pathname}`
   } catch {
@@ -172,15 +169,43 @@ export function normalizeAmazonUrl(url: string): string {
 }
 
 /**
+ * Normalize series URL for scraping to ensure consistent format view.
+ * Adds binding=paperback to force paperback format ASINs.
+ *
+ * This prevents duplicate book creation when Amazon shows different ASINs
+ * for the same book depending on the selected format (Kindle vs Paperback).
+ * Paperback ASINs are typically ISBN-based and more stable than Kindle ASINs.
+ */
+export function normalizeSeriesUrlForScraping(url: string): string {
+  if (!url) return url
+
+  try {
+    const parsed = new URL(url)
+
+    // Only modify Amazon URLs
+    if (!parsed.hostname.includes('amazon.')) return url
+
+    // Set binding to paperback for consistent ASINs
+    parsed.searchParams.set('binding', 'paperback')
+
+    return parsed.toString()
+  } catch {
+    return url
+  }
+}
+
+/**
  * Build a canonical author URL preserving the slug if available.
+ * Normalizes slug to lowercase for consistent URL deduplication.
  *
  * @param authorId - The Amazon author ID (e.g., "B000APNG74")
  * @param slug - Optional slug (e.g., "Arnold-Lobel")
- * @returns URL like /Arnold-Lobel/e/B000APNG74 or /e/B000APNG74
+ * @returns URL like /arnold-lobel/e/B000APNG74 or /e/B000APNG74
  */
 export function buildAuthorUrl(authorId: string, slug?: string | null): string {
   if (slug) {
-    return `https://www.amazon.com/${slug}/e/${authorId}`
+    // Normalize slug to lowercase for consistent deduplication
+    return `https://www.amazon.com/${slug.toLowerCase()}/e/${authorId}`
   }
   return `https://www.amazon.com/e/${authorId}`
 }

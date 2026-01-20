@@ -1,5 +1,5 @@
-import { ScrapeResult, ScrapeOptions } from '../../types'
-import { withBrowser, navigateWithRetry } from '../../providers/playwright'
+import { ScrapeResult, ScrapeOptions } from '@/lib/scraping/types'
+import { withBrowser, navigateWithRetry } from '@/lib/scraping/providers/playwright/browser'
 import { SeriesData } from './types'
 import { parseSeriesFromPage } from './parse'
 
@@ -7,10 +7,7 @@ import { parseSeriesFromPage } from './parse'
  * Scrape series data from an Amazon series URL.
  * Uses Playwright with stealth plugin for better bot bypassing.
  */
-export async function scrapeSeries(
-  url: string,
-  options?: ScrapeOptions
-): Promise<ScrapeResult<SeriesData>> {
+export async function scrapeSeries(url: string, options?: ScrapeOptions): Promise<ScrapeResult<SeriesData>> {
   const headless = options?.headless ?? true
 
   console.log('🏁 Starting series scrape with Playwright', { url, headless })

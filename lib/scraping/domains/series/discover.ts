@@ -1,5 +1,5 @@
 import type { SeriesData } from './types'
-import type { Discovery } from '../../types'
+import type { Discovery } from '@/lib/scraping/types'
 
 /**
  * Extract discoveries from parsed series data.
@@ -13,6 +13,7 @@ export function discoverSeriesLinks(data: SeriesData): Discovery[] {
   const booksToQueue = data.books.filter((book) => {
     if (book.format === 'audiobook') return false
     if (!book.amazonUrl) return false
+    if (!isAllowedSeriesDiscoveredBookUrl(book.amazonUrl)) return false
     return true
   })
 
@@ -25,6 +26,7 @@ export function discoverSeriesLinks(data: SeriesData): Discovery[] {
       url: book.amazonUrl!,
       metadata: {
         name: book.title ?? undefined,
+        imageUrl: book.coverImageUrl ?? undefined,
         position: book.position ?? undefined,
       },
       priority: 30,
@@ -53,4 +55,22 @@ export function discoverSeriesLinks(data: SeriesData): Discovery[] {
   }
 
   return discoveries
+}
+
+function isAllowedSeriesDiscoveredBookUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+
+    // Hard block known "similar items" widgets that leak unrelated books.
+    if (parsed.pathname.includes('/ref=mes-dp')) return false
+
+    // Only accept canonical product URL shapes.
+    const isProduct = /\/dp\/[A-Z0-9]{10}/i.test(parsed.pathname) || /\/gp\/product\/[A-Z0-9]{10}/i.test(parsed.pathname)
+    if (!isProduct) return false
+
+    return true
+  } catch {
+    // If it's not parseable, be conservative and skip.
+    return false
+  }
 }

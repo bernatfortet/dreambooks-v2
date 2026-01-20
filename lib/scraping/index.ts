@@ -1,6 +1,10 @@
 // Types
 export type { Provider, ScrapeOptions, ScrapeResult, Discovery } from './types'
 
+// Config & Versions
+export { SCRAPE_VERSIONS, SCRAPING_CONFIG } from './config'
+export type { ScrapeVersions } from './config'
+
 // Domains
 export { scrapeBook, extractAsinFromUrl, parseBookFromPage } from './domains/book'
 export type { BookData } from './domains/book'

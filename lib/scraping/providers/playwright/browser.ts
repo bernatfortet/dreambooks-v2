@@ -1,7 +1,7 @@
 import { chromium } from 'playwright-extra'
 import { Browser, Page } from 'playwright'
 import StealthPlugin from 'puppeteer-extra-plugin-stealth'
-import { ScrapeResult } from '../../types'
+import { ScrapeResult } from '@/lib/scraping/types'
 
 // Apply stealth plugin to bypass bot detection
 chromium.use(StealthPlugin())
@@ -14,10 +14,7 @@ type BrowserConfig = {
   userAgent?: string
 }
 
-export async function withBrowser<T>(params: {
-  config?: BrowserConfig
-  action: (page: Page) => Promise<T>
-}): Promise<ScrapeResult<T>> {
+export async function withBrowser<T>(params: { config?: BrowserConfig; action: (page: Page) => Promise<T> }): Promise<ScrapeResult<T>> {
   const { config, action } = params
   const headless = config?.headless ?? true
   const userAgent = config?.userAgent ?? DEFAULT_USER_AGENT
@@ -47,12 +44,7 @@ export async function withBrowser<T>(params: {
   }
 }
 
-export async function navigateWithRetry(params: {
-  page: Page
-  url: string
-  maxRetries?: number
-  waitMs?: number
-}): Promise<void> {
+export async function navigateWithRetry(params: { page: Page; url: string; maxRetries?: number; waitMs?: number }): Promise<void> {
   const { page, url, maxRetries = 3, waitMs = 2000 } = params
 
   let lastError: Error | null = null

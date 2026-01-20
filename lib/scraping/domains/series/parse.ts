@@ -1,11 +1,26 @@
 import type { Page } from 'playwright'
 import { SeriesData, SeriesBookEntry, SeriesPagination, BookFormat, AuthorLink } from './types'
-import { FORMAT_PRIORITY } from '../book/types'
-import { dumpPageHtml } from '../../utils/html-dump'
-import { SCRAPING_CONFIG } from '../../config'
-import { extractAsin } from '../../utils/amazon-url'
+import { FORMAT_PRIORITY } from '@/lib/scraping/domains/book/types'
+import { dumpPageHtml } from '@/lib/scraping/utils/html-dump'
+import { SCRAPING_CONFIG } from '@/lib/scraping/config'
+import { extractAsin, extractAuthorId } from '@/lib/scraping/utils/amazon-url'
+import type { Locator } from 'playwright'
 
 const { visibilityTimeoutMs, textContentTimeoutMs, attributeTimeoutMs } = SCRAPING_CONFIG.extraction
+
+// Consolidated patterns for ASIN extraction from HTML/URLs
+const ASIN_URL_PATTERNS = [/\/dp\/([A-Z0-9]{10})/i, /\/gp\/product\/([A-Z0-9]{10})/i, /[?&]asin=([A-Z0-9]{10})/i]
+
+// Pattern for extracting position from URL ref parameter (0-indexed)
+const URL_REF_POSITION_PATTERN = /ref_=dbs_m_mng_rwt_calw_thcv_(\d+)/i
+
+// Patterns for extracting position from text
+const TEXT_POSITION_PATTERNS = [
+  /(?:Book|#)\s*(\d+)(?:\s|$|\)|,|of)/i,
+  /(\d+)\s*(?:of|in)\s*(?:this\s*)?series/i,
+  /position\s*(\d+)/i,
+  /#(\d+)/i,
+]
 
 /**
  * Parse series data from an Amazon series page using Playwright.
@@ -17,11 +32,13 @@ export async function parseSeriesFromPage(page: Page): Promise<SeriesData> {
   // Dump HTML for debugging
   await dumpPageHtml(page, `series_${extractAsin(page.url()) ?? 'unknown'}`)
 
+  await assertLikelySeriesPage(page)
+
   const name = await extractSeriesName(page)
   const description = await extractDescription(page)
   const totalBooks = await extractTotalBooks(page)
   const coverImageUrl = await extractCoverImage(page)
-  const asin = extractAsinFromUrl(page.url())
+  const asin = extractAsin(page.url())
   const books = await extractBooks(page)
   const pagination = await extractPagination(page)
 
@@ -170,11 +187,7 @@ async function extractTotalBooks(page: Page): Promise<number | null> {
     const pageText = await page.evaluate(() => document.body?.textContent ?? '')
     if (!pageText) return null
 
-    const patterns = [
-      /(\d+)\s*books?\s*(?:in\s*(?:this\s*)?series)?/i,
-      /\((\d+)\s*book\s*series\)/i,
-      /series\s*\((\d+)\s*books?\)/i,
-    ]
+    const patterns = [/(\d+)\s*books?\s*(?:in\s*(?:this\s*)?series)?/i, /\((\d+)\s*book\s*series\)/i, /series\s*\((\d+)\s*books?\)/i]
 
     for (const pattern of patterns) {
       const match = pageText.match(pattern)
@@ -189,10 +202,10 @@ async function extractTotalBooks(page: Page): Promise<number | null> {
 
 async function extractCoverImage(page: Page): Promise<string | null> {
   const selectors = [
+    '#seriesImageBlock', // img element has this id directly
+    'img.a-dynamic-image[data-a-image-name="seriesImage"]', // fallback with attribute
     '.series-image img',
-    '#seriesImageBlock img',
     '#imgTagWrapperId img',
-    '.a-dynamic-image',
   ]
 
   for (const selector of selectors) {
@@ -306,10 +319,11 @@ async function extractBooks(page: Page): Promise<SeriesBookEntry[]> {
 
   // Find book items - Amazon uses various structures
   const bookSelectors = [
+    // Canonical series listing container
+    '#series-childAsin-list .series-childAsin-item',
+    // Fallbacks (still series-specific)
     '.series-childAsin-item',
-    '[data-asin]:has(a[href*="/dp/"])',
-    '.a-carousel-card:has(a[href*="/dp/"])',
-    '.a-section:has(a[href*="/dp/"]):has(img)',
+    '[id^="series-childAsin-item_"]',
   ]
 
   for (const selector of bookSelectors) {
@@ -326,13 +340,35 @@ async function extractBooks(page: Page): Promise<SeriesBookEntry[]> {
             const entry = await Promise.race([
               extractBookEntry(bookElement),
               new Promise<SeriesBookEntry>((resolve) =>
-                setTimeout(() => resolve({ title: null, asin: null, amazonUrl: null, position: null, coverImageUrl: null, format: 'unknown', authors: [], authorLinks: [] }), 3000)
+                setTimeout(
+                  () =>
+                    resolve({
+                      title: null,
+                      asin: null,
+                      amazonUrl: null,
+                      position: null,
+                      coverImageUrl: null,
+                      format: 'unknown',
+                      authors: [],
+                      authorLinks: [],
+                    }),
+                  3000,
+                ),
               ),
             ])
             return entry
           } catch (error) {
             console.log(`  ⚠️ Error extracting book ${index + 1}:`, error instanceof Error ? error.message : 'Unknown')
-            return { title: null, asin: null, amazonUrl: null, position: null, coverImageUrl: null, format: 'unknown' as BookFormat, authors: [], authorLinks: [] }
+            return {
+              title: null,
+              asin: null,
+              amazonUrl: null,
+              position: null,
+              coverImageUrl: null,
+              format: 'unknown' as BookFormat,
+              authors: [],
+              authorLinks: [],
+            }
           }
         })
 
@@ -358,12 +394,10 @@ async function extractBooks(page: Page): Promise<SeriesBookEntry[]> {
     }
   }
 
-  // If we didn't find structured book elements, try finding all book links
-  if (books.length === 0) {
-    console.log('🔍 Falling back to link extraction...')
-    const bookLinks = await extractBookLinks(page)
-    books.push(...bookLinks)
-  }
+  // IMPORTANT:
+  // Do NOT fall back to global link scraping here.
+  // On non-series pages (or Kindle product pages), the DOM contains lots of unrelated
+  // "similar items" modules (e.g. mes-dp) that look like book lists and cause leaks.
 
   // Deduplicate books by title/position, preferring hardcover > paperback > kindle
   console.log(`📚 Pre-dedup: ${books.length} total entries`)
@@ -376,476 +410,239 @@ async function extractBooks(page: Page): Promise<SeriesBookEntry[]> {
   return deduplicated
 }
 
-async function extractBookEntry(element: any): Promise<SeriesBookEntry> {
+async function assertLikelySeriesPage(page: Page): Promise<void> {
+  const hasCollectionTitle = await page
+    .locator('#collection-title')
+    .first()
+    .isVisible({ timeout: visibilityTimeoutMs })
+    .catch(() => false)
+
+  const seriesItemCount = await page
+    .locator('#series-childAsin-list .series-childAsin-item, .series-childAsin-item, [id^="series-childAsin-item_"]')
+    .count()
+    .catch(() => 0)
+
+  if (!hasCollectionTitle && seriesItemCount === 0) {
+    throw new Error('Page does not look like an Amazon series page (missing series listing)')
+  }
+}
+
+async function extractBookEntry(element: Locator): Promise<SeriesBookEntry> {
   let title: string | null = null
   let asin: string | null = null
   let amazonUrl: string | null = null
   let position: number | null = null
   let coverImageUrl: string | null = null
-  let format: BookFormat = 'unknown'
   const authors: string[] = []
   const authorLinks: AuthorLink[] = []
 
   try {
-    // FIRST: Try to get ASIN directly from element's data-asin attribute (fastest)
-    try {
-      asin = await element.getAttribute('data-asin')
-    } catch {
-      // Ignore
-    }
-
-    // Get HTML for more detailed extraction
+    // Get data from element attributes first (fastest)
+    asin = await element.getAttribute('data-asin').catch(() => null)
+    const elementId = await element.getAttribute('id').catch(() => null)
     const elementHtml = await element.innerHTML().catch(() => null)
 
-    // Also try to get outerHTML and check for data attributes
-    const elementId = await element.getAttribute('id').catch(() => null)
-    const dataAttributes = await element.evaluate((el: Element) => {
-      const attrs: Record<string, string> = {}
-      for (const attr of el.attributes) {
-        if (attr.name.startsWith('data-')) {
-          attrs[attr.name] = attr.value
-        }
-      }
-      return attrs
-    }).catch(() => null)
-
-    // FIRST PRIORITY: Extract position from element ID (e.g., "series-childAsin-item_1" → 1)
-    if (!position && elementId) {
+    // Extract position from element ID (e.g., "series-childAsin-item_1" → 1)
+    if (elementId) {
       const idMatch = elementId.match(/series-childAsin-item[_-](\d+)/i)
       if (idMatch) {
         const idPosition = parseInt(idMatch[1], 10)
-        if (idPosition >= 1 && idPosition <= 100) {
-          position = idPosition
-        }
+        if (idPosition >= 1 && idPosition <= 100) position = idPosition
       }
     }
 
-    // Check data attributes for position
-    if (!position && dataAttributes) {
-      for (const [key, value] of Object.entries(dataAttributes)) {
-        if (key.toLowerCase().includes('position') || key.toLowerCase().includes('index') || key.toLowerCase().includes('order')) {
-          const numValue = parseInt(value, 10)
-          if (!isNaN(numValue) && numValue >= 1 && numValue <= 100) {
-            position = numValue
-            break
+    // Extract position from data attributes
+    if (!position) {
+      const dataAttributes = await element
+        .evaluate((el: Element) => {
+          const attrs: Record<string, string> = {}
+          for (let i = 0; i < el.attributes.length; i++) {
+            const attr = el.attributes[i]
+            if (attr.name.startsWith('data-')) attrs[attr.name] = attr.value
           }
-        }
-      }
-    }
+          return attrs
+        })
+        .catch(() => null)
 
-    if (elementHtml) {
-      // If we don't have ASIN yet, try to get it from data-asin in HTML
-      if (!asin) {
-        const dataAsinMatches = elementHtml.matchAll(/data-asin=["']([A-Z0-9]{10})["']/gi)
-        for (const match of dataAsinMatches) {
-          asin = match[1]
-          break // Take first one
-        }
-      }
-
-      // SECOND: Extract URL, ASIN, title, and position from links and their attributes
-      // Try multiple URL patterns: /dp/, /gp/product/, etc.
-      const linkPatterns = [
-        /<a[^>]+href=["']([^"']*\/dp\/([A-Z0-9]{10})[^"']*)["'][^>]*title=["']([^"']+)["'][^>]*>/gi,
-        /<a[^>]+href=["']([^"']*\/gp\/product\/([A-Z0-9]{10})[^"']*)["'][^>]*title=["']([^"']+)["'][^>]*>/gi,
-        /<a[^>]+href=["']([^"']*\/[^"']*asin=([A-Z0-9]{10})[^"']*)["'][^>]*title=["']([^"']+)["'][^>]*>/gi,
-      ]
-
-      for (const pattern of linkPatterns) {
-        const linkMatches = elementHtml.matchAll(pattern)
-        for (const match of linkMatches) {
-          const fullUrl = match[1]
-          const extractedAsin = match[2]
-          const titleAttr = match[3]?.trim()
-
-          // Extract full URL
-          if (fullUrl && !amazonUrl) {
-            amazonUrl = fullUrl.startsWith('http') ? fullUrl : `https://www.amazon.com${fullUrl}`
-          }
-
-          // Extract ASIN if we don't have it yet
-          if (!asin && extractedAsin) {
-            asin = extractedAsin
-          }
-
-          // Extract position from URL ref parameter (e.g., ref_=dbs_m_mng_rwt_calw_thcv_0 → position 1)
-          if (!position && fullUrl) {
-            const refMatch = fullUrl.match(/ref_=dbs_m_mng_rwt_calw_thcv_(\d+)/i)
-            if (refMatch) {
-              const refIndex = parseInt(refMatch[1], 10)
-              // ref parameter is 0-indexed, convert to 1-indexed position
-              if (refIndex >= 0 && refIndex < 100) {
-                position = refIndex + 1
-              }
-            }
-          }
-
-          // Extract title and position from title attribute
-          if (titleAttr) {
-            // Extract position from title attribute (e.g., "#1", "#2", "Book 1")
-            if (!position) {
-              const posMatch = titleAttr.match(/#(\d+)|Book\s+(\d+)/i)
-              if (posMatch) {
-                position = parseInt(posMatch[1] || posMatch[2], 10)
-              }
-            }
-
-            // Extract title - remove position info and series names but keep raw title from Amazon
-            if (!title) {
-              let cleanTitle = titleAttr
-                .replace(/#\d+/g, '') // Remove #1, #2, etc.
-                .replace(/Book\s+\d+/gi, '') // Remove "Book 1", etc.
-                .replace(/\s*\([^)]+\)\s*$/, '') // Remove trailing parentheses (series names)
-                .replace(/\s+/g, ' ')
-                .trim()
-
-              if (cleanTitle.length > 3) {
-                title = cleanTitle
-              }
-            }
-          }
-
-          // If we got everything, break
-          if (amazonUrl && asin && title && position) break
-        }
-        if (amazonUrl && asin && title && position) break
-      }
-
-      // THIRD: If we still don't have ASIN, try extracting from any URL pattern in the HTML
-      if (!asin) {
-        const urlPatterns = [
-          /\/dp\/([A-Z0-9]{10})/,
-          /\/gp\/product\/([A-Z0-9]{10})/,
-          /[?&]asin=([A-Z0-9]{10})/i,
-        ]
-
-        for (const pattern of urlPatterns) {
-          const match = elementHtml.match(pattern)
-          if (match) {
-            asin = match[1]
-            break
-          }
-        }
-      }
-
-      // If no title from link, try h2 or other headings
-      if (!title) {
-        const headingMatch = elementHtml.match(/<h[23][^>]*>([^<]+)<\/h[23]>/i)
-        if (headingMatch) {
-          let headingText = headingMatch[1]
-            .trim()
-            .replace(/\s*\([^)]+\)\s*$/, '') // Remove trailing parentheses (series names)
-            .trim()
-          if (headingText.length > 3 && !/^\d+$/.test(headingText)) {
-            title = headingText
-          }
-        }
-      }
-
-      // Extract position from text patterns (only if not already found from title attribute)
-      // Be more specific to avoid matching CSS pixel values (170px, etc.)
-      if (!position) {
-        // Also check element's text content and parent/sibling text
-        const elementText = await element.textContent().catch(() => null)
-        const parentText = await element.locator('..').textContent().catch(() => null)
-        const previousSiblingText = await element.evaluate((el: Element) => {
-          const prev = el.previousElementSibling
-          return prev?.textContent || null
-        }).catch(() => null)
-
-        // Try to find position in text content
-        const allText = [elementText, parentText, previousSiblingText].filter(Boolean).join(' ')
-        if (allText) {
-          const textPosPatterns = [
-            /(?:Book|#)\s*(\d+)(?:\s|$|\)|,|of)/i,
-            /(\d+)\s*(?:of|in)\s*(?:this\s*)?series/i,
-            /position\s*(\d+)/i,
-            /#(\d+)/i,
-          ]
-          for (const pattern of textPosPatterns) {
-            const match = allText.match(pattern)
-            if (match) {
-              const value = parseInt(match[1], 10)
-              if (value >= 1 && value <= 100) {
-                position = value
-                break
-              }
-            }
-          }
-        }
-
-        const positionPatterns = [
-          /(?:Book\s+)?#(\d+)(?:\s|$|\))/i, // Match #1, #2, etc. but not 170px
-          /Book\s+(\d+)(?:\s|$|\))/i, // Match "Book 1", "Book 2", etc.
-          /(\d+)\s*(?:of|in)\s+this\s+series/i, // Match "1 of this series"
-        ]
-
-        for (const pattern of positionPatterns) {
-          const match = elementHtml.match(pattern)
-          if (match) {
-            const value = parseInt(match[1], 10)
-            // Only accept reasonable position values (1-100, not CSS values like 170)
-            if (value >= 1 && value <= 100) {
-              position = value
+      if (dataAttributes) {
+        for (const key of Object.keys(dataAttributes)) {
+          const value = dataAttributes[key]
+          if (key.toLowerCase().includes('position') || key.toLowerCase().includes('index') || key.toLowerCase().includes('order')) {
+            const numValue = parseInt(value, 10)
+            if (!isNaN(numValue) && numValue >= 1 && numValue <= 100) {
+              position = numValue
               break
             }
           }
         }
       }
+    }
+
+    // HTML-based extraction
+    if (elementHtml) {
+      if (!asin) asin = extractAsinFromHtml(elementHtml)
+
+      // Extract URL, ASIN, title, position from link elements in HTML
+      const linkPattern =
+        /<a[^>]+href=["']([^"']*(?:\/dp\/|\/gp\/product\/)([A-Z0-9]{10})[^"']*)["'][^>]*(?:title=["']([^"']+)["'])?[^>]*>/gi
+      const linkMatches = elementHtml.matchAll(linkPattern)
+
+      for (const match of linkMatches) {
+        const fullUrl = match[1]
+        const extractedAsin = match[2]
+        const titleAttr = match[3]?.trim()
+
+        if (fullUrl && !amazonUrl) {
+          amazonUrl = fullUrl.startsWith('http') ? fullUrl : `https://www.amazon.com${fullUrl}`
+        }
+
+        if (!asin && extractedAsin) asin = extractedAsin
+        if (!position && fullUrl) position = extractPositionFromUrl(fullUrl)
+
+        if (titleAttr) {
+          if (!position) position = extractPositionFromText(titleAttr)
+          if (!title) title = cleanBookTitle(titleAttr)
+        }
+
+        if (amazonUrl && asin && title && position) break
+      }
+
+      // Fallback: extract ASIN from any URL in HTML
+      if (!asin) asin = extractAsinFromHtml(elementHtml)
+
+      // Fallback: extract title from headings
+      if (!title) {
+        const headingMatch = elementHtml.match(/<h[23][^>]*>([^<]+)<\/h[23]>/i)
+        if (headingMatch) title = cleanBookTitle(headingMatch[1])
+      }
 
       // Extract cover image
-      const imgMatches = elementHtml.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)
-      for (const match of imgMatches) {
-        const imgSrc = match[1]
-        // Skip data URIs and very small images
+      const imgMatch = elementHtml.match(/<img[^>]+src=["']([^"']+)["']/i)
+      if (imgMatch) {
+        const imgSrc = imgMatch[1]
         if (!imgSrc.includes('data:') && !imgSrc.includes('pixel') && imgSrc.length > 20) {
           coverImageUrl = imgSrc
-          break
         }
       }
 
       // Extract authors from HTML
-      // Look for author links (href contains /author/ or /e/)
-      const authorLinkPattern = /<a[^>]+href=["']([^"']*(?:\/author\/|\/e\/)[^"']*)["'][^>]*>([^<]+)<\/a>/gi
-      const authorMatches = elementHtml.matchAll(authorLinkPattern)
-      for (const match of authorMatches) {
-        const authorUrl = match[1]?.trim()
-        const authorName = match[2]?.trim()
-        
-        if (authorName && authorName.length > 1 && !authors.includes(authorName)) {
-          authors.push(authorName)
-        }
-        
-        if (authorUrl && authorName && authorName.length > 1) {
-          // Build full URL, preserving the original path format (including /e/ and slug)
-          const fullAuthorUrl = authorUrl.startsWith('http')
-            ? authorUrl
-            : `https://www.amazon.com${authorUrl}`
-          
-          // Normalize by extracting author ID for deduplication
-          const authorIdMatch = fullAuthorUrl.match(/\/(?:author|e)\/([A-Z0-9]+)/i)
-          const authorId = authorIdMatch?.[1]?.toUpperCase()
-          
-          // Only add if not already present (by author ID to avoid duplicates with different URL formats)
-          if (authorId && !authorLinks.some((link) => link.url.includes(authorId))) {
-            authorLinks.push({ name: authorName, url: fullAuthorUrl })
-          }
-        }
-      }
-
-      // Fallback: look for "by Author Name" pattern in text
-      if (authors.length === 0) {
-        const byPattern = /(?:by|By)\s+([A-Z][a-zA-Z\s]+?)(?:\s*[|,;]|\s*$|<\/)/i
-        const byMatch = elementHtml.match(byPattern)
-        if (byMatch) {
-          const authorName = byMatch[1]?.trim()
-          if (authorName && authorName.length > 1) {
-            authors.push(authorName)
-          }
-        }
-      }
+      const htmlAuthors = extractAuthorsFromHtml(elementHtml)
+      authors.push(...htmlAuthors.names.filter((n) => !authors.includes(n)))
+      authorLinks.push(...htmlAuthors.links.filter((l) => !authorLinks.some((al) => al.url === l.url)))
     }
 
-    // Fallback: try using element methods if HTML parsing didn't work
+    // Fallback: extract position from surrounding text
+    if (!position) {
+      const elementText = await element.textContent().catch(() => null)
+      const parentText = await element
+        .locator('..')
+        .textContent()
+        .catch(() => null)
+      const allText = [elementText, parentText].filter(Boolean).join(' ')
+      if (allText) position = extractPositionFromText(allText)
+    }
+
+    // Fallback: element-based extraction if HTML parsing incomplete
     if (!title || !asin || !amazonUrl) {
-      try {
-        // Try to get ASIN from child elements with data-asin
-        if (!asin) {
-          const asinElement = element.locator('[data-asin]').first()
-          const asinVisible = await asinElement.isVisible({ timeout: 500 }).catch(() => false)
-          if (asinVisible) {
-            const dataAsin = await asinElement.getAttribute('data-asin').catch(() => null)
-            if (dataAsin && /^[A-Z0-9]{10}$/.test(dataAsin)) {
-              asin = dataAsin
-            }
-          }
-        }
-
-        // Try to find link elements with multiple patterns
-        const linkSelectors = [
-          'a[href*="/dp/"]',
-          'a[href*="/gp/product/"]',
-          'a[href*="asin="]',
-          'a[href*="dp/"]', // More flexible
-        ]
-
-        for (const selector of linkSelectors) {
-          try {
-            const linkElement = element.locator(selector).first()
-            const linkVisible = await linkElement.isVisible({ timeout: 500 }).catch(() => false)
-
-            if (linkVisible) {
-              const href = await linkElement.getAttribute('href').catch(() => null)
-              const titleAttr = await linkElement.getAttribute('title').catch(() => null)
-
-              if (href) {
-                // Extract full URL
-                if (!amazonUrl) {
-                  amazonUrl = href.startsWith('http') ? href : `https://www.amazon.com${href}`
-                }
-
-                // Extract ASIN from URL
-                if (!asin) {
-                  const patterns = [
-                    /\/dp\/([A-Z0-9]{10})/,
-                    /\/gp\/product\/([A-Z0-9]{10})/,
-                    /[?&]asin=([A-Z0-9]{10})/i,
-                  ]
-                  for (const pattern of patterns) {
-                    const match = href.match(pattern)
-                    if (match) {
-                      asin = match[1]
-                      break
-                    }
-                  }
-                }
-
-                // Extract position from URL ref parameter (fallback)
-                if (!position && href) {
-                  const refMatch = href.match(/ref_=dbs_m_mng_rwt_calw_thcv_(\d+)/i)
-                  if (refMatch) {
-                    const refIndex = parseInt(refMatch[1], 10)
-                    // ref parameter is 0-indexed, convert to 1-indexed position
-                    if (refIndex >= 0 && refIndex < 100) {
-                      position = refIndex + 1
-                    }
-                  }
-                }
-              }
-
-              // Extract title and position from title attribute (preferred)
-              if (titleAttr) {
-                // Extract position
-                if (!position) {
-                  const posMatch = titleAttr.match(/#(\d+)|Book\s+(\d+)/i)
-                  if (posMatch) {
-                    const posValue = parseInt(posMatch[1] || posMatch[2], 10)
-                    if (posValue >= 1 && posValue <= 100) {
-                      position = posValue
-                    }
-                  }
-                }
-
-                // Extract title - remove position info and series names but keep raw title
-                if (!title) {
-                  let cleanTitle = titleAttr
-                    .replace(/#\d+/g, '')
-                    .replace(/Book\s+\d+/gi, '')
-                    .replace(/\s*\([^)]+\)\s*$/, '') // Remove trailing parentheses (series names)
-                    .replace(/\s+/g, ' ')
-                    .trim()
-
-                  if (cleanTitle.length > 3) {
-                    title = cleanTitle
-                  }
-                }
-              }
-
-              // Fallback: Extract title from link text if title attribute didn't work
-              if (!title) {
-                const linkText = await linkElement.textContent({ timeout: 500 }).catch(() => null)
-                if (linkText && linkText.trim().length > 3 && !/^\d+$/.test(linkText.trim()) && linkText.trim() !== 'Kindle') {
-                  let cleanTitle = linkText
-                    .trim()
-                    .replace(/\s*\([^)]+\)\s*$/, '') // Remove trailing parentheses (series names)
-                    .trim()
-                  if (cleanTitle.length > 3) {
-                    title = cleanTitle
-                  }
-                }
-              }
-
-              // If we got what we need, break
-              if (asin && amazonUrl) break
-            }
-          } catch {
-            continue
-          }
-        }
-
-        // Extract authors using element methods (fallback if HTML parsing didn't work)
-        // Try to find author links if we have neither or if we have names but no links
-        if (authors.length === 0 || authorLinks.length === 0) {
-          try {
-            // Look for author links within the element
-            const authorSelectors = [
-              'a[href*="/author/"]',
-              'a[href*="/e/"]',
-              '.a-link-normal[href*="/author/"]',
-            ]
-
-            for (const selector of authorSelectors) {
-              try {
-                const authorElements = await element.locator(selector).all()
-                for (const authorElement of authorElements) {
-                  const authorVisible = await authorElement.isVisible({ timeout: 500 }).catch(() => false)
-                  if (authorVisible) {
-                    const authorName = await authorElement.textContent({ timeout: 500 }).catch(() => null)
-                    const trimmedName = authorName?.trim()
-                    
-                    if (trimmedName && trimmedName.length > 1) {
-                      if (!authors.includes(trimmedName)) {
-                        authors.push(trimmedName)
-                      }
-                      
-                      // Extract author URL and pair with name (preserving original URL format with slug)
-                      const href = await authorElement.getAttribute('href', { timeout: attributeTimeoutMs }).catch(() => null)
-                      if (href) {
-                        const fullAuthorUrl = href.startsWith('http')
-                          ? href
-                          : `https://www.amazon.com${href}`
-                        
-                        // Extract author ID for deduplication
-                        const authorIdMatch = fullAuthorUrl.match(/\/(?:author|e)\/([A-Z0-9]+)/i)
-                        const authorId = authorIdMatch?.[1]?.toUpperCase()
-                        
-                        if (authorId && !authorLinks.some((link) => link.url.includes(authorId))) {
-                          authorLinks.push({ name: trimmedName, url: fullAuthorUrl })
-                        }
-                      }
-                    }
-                  }
-                }
-                // Break if we found authors
-                if (authors.length > 0) break
-              } catch {
-                continue
-              }
-            }
-          } catch {
-            // Ignore
-          }
-        }
-      } catch {
-        // Ignore
-      }
+      await extractBookDataFromElement(element, { title, asin, amazonUrl, position }, (data) => {
+        if (!title && data.title) title = data.title
+        if (!asin && data.asin) asin = data.asin
+        if (!amazonUrl && data.amazonUrl) amazonUrl = data.amazonUrl
+        if (!position && data.position) position = data.position
+      })
     }
 
-    // Construct URL from ASIN if we have ASIN but no URL
-    if (!amazonUrl && asin) {
-      amazonUrl = `https://www.amazon.com/dp/${asin}`
+    // Fallback: author extraction from element
+    if (authors.length === 0 || authorLinks.length === 0) {
+      const elementAuthors = await extractAuthorsFromElement(element)
+      authors.push(...elementAuthors.names.filter((n) => !authors.includes(n)))
+      authorLinks.push(...elementAuthors.links.filter((l) => !authorLinks.some((al) => al.url === l.url)))
     }
 
-    // Clean up title - normalize whitespace and remove series names
-    if (title) {
-      title = title
-        .replace(/\s+/g, ' ')
-        .replace(/\s*\([^)]+\)\s*$/, '') // Remove trailing parentheses (series names)
-        .trim()
+    // Construct URL from ASIN if missing
+    if (!amazonUrl && asin) amazonUrl = `https://www.amazon.com/dp/${asin}`
 
-      // If title is still just a number, set to null
-      if (/^\d+$/.test(title)) {
-        title = null
-      }
-    }
+    // Final title cleanup
+    if (title) title = cleanBookTitle(title)
   } catch {
-    // Extraction errors are expected for some elements, silently continue
+    // Extraction errors expected for some elements
   }
 
-  // Detect format from extracted data
-  format = detectFormat({ title, asin, url: amazonUrl })
-
+  const format = detectFormat({ title, asin, url: amazonUrl })
   return { title, asin, amazonUrl, position, coverImageUrl, format, authors, authorLinks }
+}
+
+async function extractBookDataFromElement(
+  element: Locator,
+  current: { title: string | null; asin: string | null; amazonUrl: string | null; position: number | null },
+  update: (data: Partial<typeof current>) => void,
+): Promise<void> {
+  // Try to get ASIN from child elements
+  if (!current.asin) {
+    const asinElement = element.locator('[data-asin]').first()
+    const isVisible = await asinElement.isVisible({ timeout: 500 }).catch(() => false)
+    if (isVisible) {
+      const dataAsin = await asinElement.getAttribute('data-asin').catch(() => null)
+      if (dataAsin && /^[A-Z0-9]{10}$/.test(dataAsin)) {
+        update({ asin: dataAsin })
+      }
+    }
+  }
+
+  // Try link selectors
+  const linkSelectors = ['a[href*="/dp/"]', 'a[href*="/gp/product/"]', 'a[href*="asin="]']
+
+  for (const selector of linkSelectors) {
+    try {
+      const linkElement = element.locator(selector).first()
+      const isVisible = await linkElement.isVisible({ timeout: 500 }).catch(() => false)
+      if (!isVisible) continue
+
+      const href = await linkElement.getAttribute('href').catch(() => null)
+      const titleAttr = await linkElement.getAttribute('title').catch(() => null)
+
+      if (href) {
+        if (!current.amazonUrl) {
+          update({ amazonUrl: href.startsWith('http') ? href : `https://www.amazon.com${href}` })
+        }
+
+        if (!current.asin) {
+          const asin = extractAsin(href)
+          if (asin) update({ asin })
+        }
+
+        if (!current.position) {
+          const position = extractPositionFromUrl(href)
+          if (position) update({ position })
+        }
+      }
+
+      if (titleAttr) {
+        if (!current.position) {
+          const position = extractPositionFromText(titleAttr)
+          if (position) update({ position })
+        }
+
+        if (!current.title) {
+          const title = cleanBookTitle(titleAttr)
+          if (title) update({ title })
+        }
+      }
+
+      // Extract title from link text as last resort
+      if (!current.title) {
+        const linkText = await linkElement.textContent({ timeout: 500 }).catch(() => null)
+        if (linkText) {
+          const title = cleanBookTitle(linkText)
+          if (title && title !== 'Kindle') update({ title })
+        }
+      }
+
+      if (current.asin && current.amazonUrl) break
+    } catch {
+      continue
+    }
+  }
 }
 
 async function extractBookLinks(page: Page): Promise<SeriesBookEntry[]> {
@@ -860,78 +657,40 @@ async function extractBookLinks(page: Page): Promise<SeriesBookEntry[]> {
         const href = await link.getAttribute('href')
         if (!href) continue
 
-        const asinMatch = href.match(/\/dp\/([A-Z0-9]{10})/)
-        if (!asinMatch) continue
-
-        const asin = asinMatch[1]
-        if (seenAsins.has(asin)) continue
+        const asin = extractAsin(href)
+        if (!asin || seenAsins.has(asin)) continue
         seenAsins.add(asin)
 
         const title = await link.textContent()
+        if (!title?.trim()) continue
 
-        // Try to find position in nearby text
-        let position: number | null = null
-        const parentText = await link.locator('..').textContent().catch(() => null)
-        if (parentText) {
-          const posMatch = parentText.match(/(?:Book\s*)?#?(\d+)/i)
-          if (posMatch) position = parseInt(posMatch[1], 10)
-        }
+        const parentText = await link
+          .locator('..')
+          .textContent()
+          .catch(() => null)
+        const position = parentText ? extractPositionFromText(parentText) : null
 
-        if (title?.trim()) {
-          const format = detectFormat({ title: title.trim(), asin, url: href })
-          
-          // Try to extract authors from nearby elements
-          const authors: string[] = []
-          const authorLinks: AuthorLink[] = []
-          try {
-            const authorElements = await link.locator('..').locator('a[href*="/author/"], a[href*="/e/"]').all()
-            for (const authorElement of authorElements) {
-              const authorName = await authorElement.textContent().catch(() => null)
-              const trimmedName = authorName?.trim()
-              
-              if (trimmedName && trimmedName.length > 1) {
-                if (!authors.includes(trimmedName)) {
-                  authors.push(trimmedName)
-                }
-                
-                // Extract author URL and pair with name (preserving original URL format with slug)
-                const authorHref = await authorElement.getAttribute('href').catch(() => null)
-                if (authorHref) {
-                  const fullAuthorUrl = authorHref.startsWith('http')
-                    ? authorHref
-                    : `https://www.amazon.com${authorHref}`
-                  
-                  // Extract author ID for deduplication
-                  const authorIdMatch = fullAuthorUrl.match(/\/(?:author|e)\/([A-Z0-9]+)/i)
-                  const authorId = authorIdMatch?.[1]?.toUpperCase()
-                  
-                  if (authorId && !authorLinks.some((link) => link.url.includes(authorId))) {
-                    authorLinks.push({ name: trimmedName, url: fullAuthorUrl })
-                  }
-                }
-              }
-            }
-          } catch {
-            // Ignore
-          }
+        const parentElement = link.locator('..')
+        const { names: authors, links: authorLinks } = await extractAuthorsFromElement(parentElement)
 
-          books.push({
-            title: title.trim(),
-            asin,
-            amazonUrl: href ? (href.startsWith('http') ? href : `https://www.amazon.com${href}`) : null,
-            position,
-            coverImageUrl: null,
-            format,
-            authors,
-            authorLinks,
-          })
-        }
+        const format = detectFormat({ title: title.trim(), asin, url: href })
+
+        books.push({
+          title: title.trim(),
+          asin,
+          amazonUrl: href.startsWith('http') ? href : `https://www.amazon.com${href}`,
+          position,
+          coverImageUrl: null,
+          format,
+          authors,
+          authorLinks,
+        })
       } catch {
         continue
       }
     }
   } catch {
-    // Ignore
+    // Ignore errors
   }
 
   return books
@@ -939,11 +698,7 @@ async function extractBookLinks(page: Page): Promise<SeriesBookEntry[]> {
 
 // --- Format detection helpers ---
 
-function detectFormat(params: {
-  title: string | null
-  asin: string | null
-  url: string | null
-}): BookFormat {
+function detectFormat(params: { title: string | null; asin: string | null; url: string | null }): BookFormat {
   const { title, asin, url } = params
   const combined = `${title ?? ''} ${url ?? ''}`.toLowerCase()
 
@@ -1001,7 +756,7 @@ function deduplicateBooksByFormat(books: SeriesBookEntry[]): SeriesBookEntry[] {
   // For each group, pick the best format
   const deduplicated: SeriesBookEntry[] = []
 
-  for (const [key, group] of groups) {
+  for (const [key, group] of Array.from(groups.entries())) {
     // Filter out audiobooks entirely
     const nonAudiobooks = group.filter((b) => b.format !== 'audiobook')
     if (nonAudiobooks.length === 0) continue
@@ -1010,9 +765,7 @@ function deduplicateBooksByFormat(books: SeriesBookEntry[]): SeriesBookEntry[] {
     nonAudiobooks.sort((a, b) => FORMAT_PRIORITY[b.format] - FORMAT_PRIORITY[a.format])
 
     const best = nonAudiobooks[0]
-    console.log(
-      `  📖 Dedup "${key}": picked ${best.format} (ASIN: ${best.asin}) from ${group.length} editions`
-    )
+    console.log(`  📖 Dedup "${key}": picked ${best.format} (ASIN: ${best.asin}) from ${group.length} editions`)
     deduplicated.push(best)
   }
 
@@ -1026,6 +779,146 @@ function deduplicateBooksByFormat(books: SeriesBookEntry[]): SeriesBookEntry[] {
   }
 
   return deduplicated
+}
+
+// --- Book entry extraction helpers ---
+
+function extractAsinFromHtml(html: string): string | null {
+  // Try data-asin attribute first
+  const dataAsinMatch = html.match(/data-asin=["']([A-Z0-9]{10})["']/i)
+  if (dataAsinMatch) return dataAsinMatch[1].toUpperCase()
+
+  // Try URL patterns
+  for (const pattern of ASIN_URL_PATTERNS) {
+    const match = html.match(pattern)
+    if (match) return match[1].toUpperCase()
+  }
+
+  return null
+}
+
+function extractPositionFromText(text: string): number | null {
+  for (const pattern of TEXT_POSITION_PATTERNS) {
+    const match = text.match(pattern)
+    if (match) {
+      const value = parseInt(match[1], 10)
+      if (value >= 1 && value <= 100) return value
+    }
+  }
+  return null
+}
+
+function extractPositionFromUrl(url: string): number | null {
+  const match = url.match(URL_REF_POSITION_PATTERN)
+  if (match) {
+    const refIndex = parseInt(match[1], 10)
+    if (refIndex >= 0 && refIndex < 100) return refIndex + 1
+  }
+  return null
+}
+
+function cleanBookTitle(rawTitle: string): string | null {
+  const cleaned = rawTitle
+    .replace(/#\d+/g, '')
+    .replace(/Book\s+\d+/gi, '')
+    .replace(/\s*\([^)]+\)\s*$/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (cleaned.length <= 3 || /^\d+$/.test(cleaned)) return null
+  return cleaned
+}
+
+interface ExtractedAuthors {
+  names: string[]
+  links: AuthorLink[]
+}
+
+function extractAuthorsFromHtml(html: string): ExtractedAuthors {
+  const names: string[] = []
+  const links: AuthorLink[] = []
+  const seenAuthorIds = new Set<string>()
+
+  const authorLinkPattern = /<a[^>]+href=["']([^"']*(?:\/author\/|\/e\/)[^"']*)["'][^>]*>([^<]+)<\/a>/gi
+  const matches = Array.from(html.matchAll(authorLinkPattern))
+
+  for (const match of matches) {
+    const authorUrl = match[1]?.trim()
+    const authorName = match[2]?.trim()
+
+    if (!authorName || authorName.length <= 1) continue
+
+    if (!names.includes(authorName)) {
+      names.push(authorName)
+    }
+
+    if (authorUrl) {
+      const fullUrl = authorUrl.startsWith('http') ? authorUrl : `https://www.amazon.com${authorUrl}`
+      const authorId = extractAuthorId(fullUrl)
+
+      if (authorId && !seenAuthorIds.has(authorId)) {
+        seenAuthorIds.add(authorId)
+        links.push({ name: authorName, url: fullUrl })
+      }
+    }
+  }
+
+  // Fallback: "by Author Name" pattern
+  if (names.length === 0) {
+    const byMatch = html.match(/(?:by|By)\s+([A-Z][a-zA-Z\s]+?)(?:\s*[|,;]|\s*$|<\/)/i)
+    if (byMatch) {
+      const authorName = byMatch[1]?.trim()
+      if (authorName && authorName.length > 1) {
+        names.push(authorName)
+      }
+    }
+  }
+
+  return { names, links }
+}
+
+async function extractAuthorsFromElement(element: Locator): Promise<ExtractedAuthors> {
+  const names: string[] = []
+  const links: AuthorLink[] = []
+  const seenAuthorIds = new Set<string>()
+
+  const authorSelectors = ['a[href*="/author/"]', 'a[href*="/e/"]']
+
+  for (const selector of authorSelectors) {
+    try {
+      const authorElements = await element.locator(selector).all()
+
+      for (const authorElement of authorElements) {
+        const isVisible = await authorElement.isVisible({ timeout: 500 }).catch(() => false)
+        if (!isVisible) continue
+
+        const authorName = await authorElement.textContent({ timeout: 500 }).catch(() => null)
+        const trimmedName = authorName?.trim()
+        if (!trimmedName || trimmedName.length <= 1) continue
+
+        if (!names.includes(trimmedName)) {
+          names.push(trimmedName)
+        }
+
+        const href = await authorElement.getAttribute('href', { timeout: attributeTimeoutMs }).catch(() => null)
+        if (href) {
+          const fullUrl = href.startsWith('http') ? href : `https://www.amazon.com${href}`
+          const authorId = extractAuthorId(fullUrl)
+
+          if (authorId && !seenAuthorIds.has(authorId)) {
+            seenAuthorIds.add(authorId)
+            links.push({ name: trimmedName, url: fullUrl })
+          }
+        }
+      }
+
+      if (names.length > 0) break
+    } catch {
+      continue
+    }
+  }
+
+  return { names, links }
 }
 
 // --- Utility helpers ---
@@ -1052,11 +945,6 @@ async function autoScroll(page: Page): Promise<void> {
       }, 100)
     })
   })
-}
-
-function extractAsinFromUrl(url: string): string | null {
-  const match = url.match(/\/dp\/([A-Z0-9]{10})/)
-  return match?.[1] ?? null
 }
 
 function extractImageSize(url: string): number {

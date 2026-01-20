@@ -1,7 +1,7 @@
 /**
  * Amazon URL normalization and ID extraction utilities.
  *
- * Re-exports from lib/scraping/utils/amazon-url.ts for backward compatibility.
+ * Re-exports from convex/lib/scraping/utils/amazonUrl.ts for backward compatibility.
  * Convex functions can import from here or directly from the shared module.
  */
 

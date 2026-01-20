@@ -1,5 +1,5 @@
 import FirecrawlApp from '@mendable/firecrawl-js'
-import { ScrapeResult } from '../../types'
+import { ScrapeResult } from '@/lib/scraping/types'
 
 let firecrawlInstance: FirecrawlApp | null = null
 

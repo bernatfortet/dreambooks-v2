@@ -7,18 +7,53 @@ export const FORMAT_PRIORITY: Record<string, number> = {
   unknown: 0,
 }
 
+// Cover source priority: paperback preferred (Kindle often has "Kindle Unlimited" branding)
+export const COVER_FORMAT_PRIORITY: Record<string, number> = {
+  paperback: 5, // Clean scans, no branding
+  kindle: 3, // Sometimes has "Kindle Unlimited" overlay
+  hardcover: 2, // Sometimes physical book photos
+  board_book: 1,
+  audiobook: 0,
+  unknown: 0,
+}
+
 export type BookFormat = {
   type: string // 'hardcover', 'paperback', 'kindle', 'audiobook', etc.
   asin: string
   amazonUrl: string
 }
 
+/**
+ * Per-edition data extracted by visiting each format page.
+ * Includes identifiers and cover URL specific to that edition.
+ */
+export type EditionData = {
+  format: string // 'hardcover', 'paperback', 'kindle', 'audiobook', etc.
+  asin: string
+  amazonUrl: string
+  isbn10: string | null
+  isbn13: string | null
+  mainCoverUrl: string | null
+  coverWidth: number | null
+  coverHeight: number | null
+}
+
+export type ContributorRole = 'author' | 'illustrator' | 'editor' | 'translator' | 'narrator' | 'other'
+
+export type Contributor = {
+  name: string
+  amazonAuthorId: string | null
+  role: ContributorRole
+}
+
 export type BookData = {
   title: string | null
   subtitle: string | null
-  authors: string[]
+  authors: string[] // Kept for backward compatibility - derived from contributors
   // Amazon author IDs extracted from byline links - used for linking to authors table
-  amazonAuthorIds: string[]
+  amazonAuthorIds: string[] // Kept for backward compatibility - derived from contributors
+  // Contributors with roles (Author, Illustrator, etc.)
+  contributors: Contributor[]
   isbn10: string | null
   isbn13: string | null
   asin: string | null
@@ -27,15 +62,48 @@ export type BookData = {
   pageCount: number | null
   description: string | null
   coverImageUrl: string | null
+  coverWidth: number | null
+  coverHeight: number | null
+  coverSourceFormat: string | null // 'kindle' | 'paperback' | 'hardcover' | etc. (normalized)
+  coverSourceAsin: string | null // ASIN of the edition used for cover
   lexileScore: number | null
-  ageRange: string | null
-  gradeLevel: string | null
+  // Age range - numeric for filtering, raw string kept for reference
+  ageRangeMin: number | null
+  ageRangeMax: number | null
+  ageRangeRaw: string | null // Original string from source (e.g., "4 - 8 years")
+  // Grade level - numeric for filtering, raw string kept for reference
+  gradeLevelMin: number | null
+  gradeLevelMax: number | null
+  gradeLevelRaw: string | null // Original string from source (e.g., "3 - 7", "Preschool - 3")
   // Series info
   seriesName: string | null
   seriesUrl: string | null
   seriesPosition: number | null
   // Available formats
   formats: BookFormat[]
+  // Per-edition data (optional - only populated when edition pages are visited)
+  editions: EditionData[]
+}
+
+// Type representing what Firecrawl extraction returns (matches bookExtractionSchema)
+export type BookExtractionResult = {
+  title?: string
+  subtitle?: string
+  authors?: string[]
+  isbn10?: string
+  isbn13?: string
+  asin?: string
+  publisher?: string
+  publishedDate?: string
+  pageCount?: number
+  description?: string
+  coverImageUrl?: string
+  lexileScore?: number
+  ageRange?: string // Note: extraction schema uses 'ageRange', BookData uses 'ageRangeRaw'
+  gradeLevel?: string
+  seriesName?: string
+  seriesUrl?: string
+  seriesPosition?: number
 }
 
 // Firecrawl extraction schema (JSON Schema format)

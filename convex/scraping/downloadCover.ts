@@ -1,9 +1,76 @@
+'use node'
+
 import { internalAction } from '../_generated/server'
 import { internal } from '../_generated/api'
 import { v } from 'convex/values'
-import { toHighResAmazonImageUrl } from './adapters/amazon/image'
+import { Id } from '../_generated/dataModel'
+import { toHighResAmazonImageUrl, toMediumResAmazonImageUrl, toThumbResAmazonImageUrl } from './adapters/amazon/image'
+import imageSize from 'image-size'
 
 const MAX_COVER_BYTES = 10 * 1024 * 1024 // 10MB
+
+type DownloadResult = {
+  storageId: Id<'_storage'>
+  width: number | null
+  height: number | null
+} | null
+
+/**
+ * Download and store an image from a URL.
+ * Returns storage ID and actual measured dimensions, or null if failed.
+ */
+async function downloadAndStore(
+  context: { storage: { store: (blob: Blob) => Promise<Id<'_storage'>> } },
+  url: string,
+  label: string,
+): Promise<DownloadResult> {
+  try {
+    const response = await fetch(url)
+
+    if (!response.ok) {
+      console.log(`⚠️ ${label} download failed`, { status: response.status, url })
+      return null
+    }
+
+    const contentType = response.headers.get('content-type') ?? ''
+    if (!contentType.startsWith('image/')) {
+      console.log(`⚠️ ${label} not an image`, { contentType, url })
+      return null
+    }
+
+    const contentLengthHeader = response.headers.get('content-length')
+    if (contentLengthHeader) {
+      const contentLength = Number(contentLengthHeader)
+      if (!Number.isNaN(contentLength) && contentLength > MAX_COVER_BYTES) {
+        console.log(`⚠️ ${label} too large`, { contentLength, url })
+        return null
+      }
+    }
+
+    const blob = await response.blob()
+    const storageId = await context.storage.store(blob)
+
+    // Measure actual image dimensions from the blob
+    let width: number | null = null
+    let height: number | null = null
+
+    try {
+      const arrayBuffer = await blob.arrayBuffer()
+      const buffer = Buffer.from(arrayBuffer)
+      const dimensions = imageSize(buffer)
+      width = dimensions.width ?? null
+      height = dimensions.height ?? null
+      console.log(`📐 ${label} dimensions measured`, { width, height, url })
+    } catch (dimensionError) {
+      console.log(`⚠️ ${label} dimension measurement failed`, { error: dimensionError, url })
+    }
+
+    return { storageId, width, height }
+  } catch (error) {
+    console.log(`⚠️ ${label} download error`, { error, url })
+    return null
+  }
+}
 
 export const downloadCover = internalAction({
   args: {
@@ -11,62 +78,99 @@ export const downloadCover = internalAction({
     sourceUrl: v.string(),
   },
   handler: async (context, args) => {
-    // Transform to high-res URL if it's an Amazon image
-    const highResUrl = toHighResAmazonImageUrl(args.sourceUrl)
+    // Get existing book to check for old covers to delete
+    const existingBook = await context.runQuery(internal.books.queries.getInternal, { id: args.bookId })
+    const oldCoverStorageIdThumb = existingBook?.cover?.storageIdThumb
+    const oldCoverStorageId = existingBook?.cover?.storageIdMedium
+    const oldCoverStorageIdFull = existingBook?.cover?.storageIdFull
 
-    console.log('🌀 Downloading cover image', {
+    // Transform to different resolutions
+    const fullResUrl = toHighResAmazonImageUrl(args.sourceUrl)
+    const mediumResUrl = toMediumResAmazonImageUrl(args.sourceUrl)
+    const thumbResUrl = toThumbResAmazonImageUrl(args.sourceUrl)
+
+    console.log('🌀 Downloading cover images', {
       bookId: args.bookId,
-      originalUrl: args.sourceUrl,
-      highResUrl,
+      sourceUrl: args.sourceUrl,
+      fullResUrl,
+      mediumResUrl,
+      thumbResUrl,
     })
 
     try {
-      // Download image (hardened) - try high-res first, fallback to original
-      let response = await fetch(highResUrl)
-      let usedUrl = highResUrl
+      // Download all 3 sizes in parallel
+      const [fullResult, mediumResult, thumbResult] = await Promise.all([
+        downloadAndStore(context, fullResUrl, 'Full-res'),
+        downloadAndStore(context, mediumResUrl, 'Medium-res'),
+        downloadAndStore(context, thumbResUrl, 'Thumb-res'),
+      ])
 
-      if (!response.ok && highResUrl !== args.sourceUrl) {
-        console.log('🔄 High-res failed, trying original URL', { status: response.status })
-        response = await fetch(args.sourceUrl)
-        usedUrl = args.sourceUrl
+      // If all failed, try the original URL as fallback for medium
+      let finalThumb = thumbResult
+      let finalMedium = mediumResult
+      let finalFull = fullResult
+
+      if (!finalMedium && !finalFull && !finalThumb) {
+        console.log('🔄 All sizes failed, trying original URL')
+        finalMedium = await downloadAndStore(context, args.sourceUrl, 'Original')
       }
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch image: ${response.status} from ${usedUrl}`)
+      // If we still have nothing, fail
+      if (!finalMedium && !finalFull && !finalThumb) {
+        throw new Error('Failed to download any cover image')
       }
 
-      // Validate content-type is image/*
-      const contentType = response.headers.get('content-type') ?? ''
-      if (!contentType.startsWith('image/')) {
-        throw new Error(`Cover URL did not return an image. content-type=${contentType}`)
-      }
+      // Fallback cascade: use whatever we have for missing sizes
+      // Priority: prefer medium as the fallback base
+      const fallback = finalMedium ?? finalFull ?? finalThumb
+      if (!finalThumb) finalThumb = fallback
+      if (!finalMedium) finalMedium = fallback
+      if (!finalFull) finalFull = fallback
 
-      // Validate size to avoid huge files
-      const contentLengthHeader = response.headers.get('content-length')
-      if (contentLengthHeader) {
-        const contentLength = Number(contentLengthHeader)
-        if (!Number.isNaN(contentLength) && contentLength > MAX_COVER_BYTES) {
-          throw new Error(`Cover image too large: ${contentLength} bytes (max: ${MAX_COVER_BYTES})`)
+      // Use dimensions from the full-res image (what we display on detail pages)
+      // Fall back to medium if full-res dimensions aren't available
+      const width = finalFull?.width ?? finalMedium?.width ?? null
+      const height = finalFull?.height ?? finalMedium?.height ?? null
+
+      console.log('📐 Final cover dimensions to store', { width, height, bookId: args.bookId })
+
+      // Update book record with actual measured dimensions
+      await context.runMutation(internal.books.mutations.updateCover, {
+        bookId: args.bookId,
+        coverStorageIdThumb: finalThumb!.storageId,
+        coverStorageId: finalMedium!.storageId,
+        coverStorageIdFull: finalFull!.storageId,
+        coverBlurHash: undefined,
+        coverStatus: 'complete',
+        width: width ?? undefined,
+        height: height ?? undefined,
+      })
+
+      // Collect all new storage IDs to avoid deleting them
+      const newStorageIds = new Set([finalThumb?.storageId, finalMedium?.storageId, finalFull?.storageId].filter(Boolean))
+
+      // Delete old covers from storage to avoid orphans
+      const oldStorageIds = [oldCoverStorageIdThumb, oldCoverStorageId, oldCoverStorageIdFull].filter(Boolean) as Id<'_storage'>[]
+      const uniqueOldIds = [...new Set(oldStorageIds)]
+      const toDelete = uniqueOldIds.filter((id) => !newStorageIds.has(id))
+
+      for (const storageId of toDelete) {
+        try {
+          await context.storage.delete(storageId)
+          console.log('🗑️ Deleted old cover from storage', { storageId })
+        } catch (error) {
+          console.log('⚠️ Failed to delete old cover', { storageId, error })
         }
       }
 
-      const blob = await response.blob()
-
-      // Store in Convex
-      const storageId = await context.storage.store(blob)
-
-      // Generate blurhash (skipped for MVP - would need sharp)
-      const blurHash = undefined
-
-      // Update book record
-      await context.runMutation(internal.books.mutations.updateCover, {
+      console.log('✅ Covers downloaded and stored', {
         bookId: args.bookId,
-        coverStorageId: storageId,
-        coverBlurHash: blurHash,
-        coverStatus: 'complete',
+        thumbStorageId: finalThumb!.storageId,
+        mediumStorageId: finalMedium!.storageId,
+        fullStorageId: finalFull!.storageId,
+        width,
+        height,
       })
-
-      console.log('✅ Cover downloaded and stored', { bookId: args.bookId, storageId })
     } catch (error) {
       console.log('🚨 Cover download failed', { bookId: args.bookId, error })
 

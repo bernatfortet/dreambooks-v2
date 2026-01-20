@@ -2,6 +2,7 @@ import { action } from '../_generated/server'
 import { internal } from '../_generated/api'
 import { v } from 'convex/values'
 import { Id } from '../_generated/dataModel'
+import { SCRAPE_VERSIONS } from '../lib/scrapeVersions'
 
 export const crawlBook = action({
   args: {
@@ -50,6 +51,15 @@ export const crawlBook = action({
         finishedAt: Date.now(),
       })
 
+      // Store the produced object offline for debugging/version comparisons
+      await context.runMutation(internal.scraping.artifacts.create, {
+        entityType: 'book',
+        sourceUrl: args.url,
+        adapter,
+        scrapeVersion: SCRAPE_VERSIONS.book,
+        payloadJson: JSON.stringify(bookData),
+      })
+
       // Step 3: Save to database (idempotent upsert by asin/isbn13)
       // Convert null to undefined (Convex validators don't accept null)
       const bookId: Id<'books'> = await context.runMutation(internal.books.mutations.upsertFromScrape, {
@@ -71,9 +81,14 @@ export const crawlBook = action({
         description: bookData.description ?? undefined,
         coverSourceUrl: bookData.coverImageUrl ?? undefined,
         lexileScore: bookData.lexileScore ?? undefined,
-        ageRange: bookData.ageRange ?? undefined,
-        gradeLevel: bookData.gradeLevel ?? undefined,
+        ageRangeMin: bookData.ageRangeMin ?? undefined,
+        ageRangeMax: bookData.ageRangeMax ?? undefined,
+        ageRange: bookData.ageRangeRaw ?? undefined,
+        gradeLevelMin: bookData.gradeLevelMin ?? undefined,
+        gradeLevelMax: bookData.gradeLevelMax ?? undefined,
+        gradeLevel: bookData.gradeLevelRaw ?? undefined,
         source: adapter,
+        scrapeVersion: SCRAPE_VERSIONS.book,
         detailsStatus: 'complete',
         coverStatus: bookData.coverImageUrl ? 'pending' : 'error',
         scrapedAt: Date.now(),

@@ -1,39 +1,109 @@
 import type { Page } from 'playwright'
-import { BookData, BookFormat, FORMAT_PRIORITY } from './types'
-import { extractAsinFromUrl, normalizeAmazonUrl } from '../../utils/amazon-url'
-import { dumpPageHtml } from '../../utils/html-dump'
-import { SCRAPING_CONFIG } from '../../config'
+import { BookData, BookFormat, FORMAT_PRIORITY, COVER_FORMAT_PRIORITY, Contributor, ContributorRole, EditionData } from './types'
+import { extractAsinFromUrl, normalizeAmazonUrl } from '@/lib/scraping/utils/amazon-url'
+import { dumpPageHtml } from '@/lib/scraping/utils/html-dump'
+import { SCRAPING_CONFIG } from '@/lib/scraping/config'
+import { parseAgeRange } from '@/lib/utils/age-range'
+import { parseGradeLevel } from '@/lib/utils/grade-level'
 
 const { visibilityTimeoutMs, textContentTimeoutMs, attributeTimeoutMs } = SCRAPING_CONFIG.extraction
 
 /**
+ * Options for parsing a book page.
+ */
+export type ParseBookOptions = {
+  /** Scrape each edition page to extract per-edition ISBNs and covers (default: false) */
+  scrapeEditions?: boolean
+  /** Maximum number of edition pages to scrape (default: 4) */
+  maxEditions?: number
+}
+
+/**
  * Parse book data from an Amazon product page using Playwright.
  * Extracts title, authors, ISBNs, series info, formats, etc.
+ *
+ * @param page - Playwright page object
+ * @param options - Parsing options (e.g., whether to scrape edition pages)
  */
-export async function parseBookFromPage(page: Page): Promise<BookData> {
-  console.log('🌀 Parsing Amazon book page...')
+export async function parseBookFromPage(page: Page, options: ParseBookOptions = {}): Promise<BookData> {
+  const { scrapeEditions = false, maxEditions = 4 } = options
+
+  console.log('🌀 Parsing Amazon book page...', { scrapeEditions, maxEditions })
 
   // Dump HTML for debugging
   await dumpPageHtml(page, `book_${extractAsinFromUrl(page.url()) ?? 'unknown'}`)
 
   const title = await extractTitle(page)
   const subtitle = await extractSubtitle(page)
-  const { names: authors, amazonAuthorIds } = await extractAuthors(page)
+  const { names: authors, amazonAuthorIds, contributors } = await extractAuthors(page)
   const { isbn10, isbn13 } = await extractIsbns(page)
-  const asin = await extractAsin(page)
   const { publisher, publishedDate } = await extractPublisherInfo(page)
   const pageCount = await extractPageCount(page)
   const description = await extractDescription(page)
-  const coverImageUrl = await extractCoverImage(page)
-  const { seriesName, seriesUrl, seriesPosition } = await extractSeriesInfo(page)
-  const { lexileScore, ageRange, gradeLevel } = await extractReadingLevel(page)
   const formats = await extractFormats(page)
+  const currentFormat = await detectCurrentFormat(page)
+  const initialCover = await extractCoverImageWithDimensions(page)
+  let coverImageUrl = initialCover.url
+  let coverWidth = initialCover.width
+  let coverHeight = initialCover.height
+  let coverSourceFormat: string | null = currentFormat
+  let coverSourceAsin: string | null = extractAsinFromUrl(page.url())
+
+  // Determine canonical ASIN: prefer hardcover from formats list, fallback to current page
+  // This ensures canonical ASIN is always hardcover (if available) regardless of starting page
+  // No need to navigate back to hardcover - we can use its ASIN from the formats list
+  const canonicalFormat =
+    formats.find((f) => f.type === 'hardcover') ??
+    [...formats].sort((a, b) => {
+      const aPriority = FORMAT_PRIORITY[a.type] ?? 0
+      const bPriority = FORMAT_PRIORITY[b.type] ?? 0
+      return bPriority - aPriority
+    })[0]
+  const asin = canonicalFormat?.asin ?? (await extractAsin(page))
+
+  // Scrape edition pages if requested (before navigating for cover)
+  let editions: EditionData[] = []
+  if (scrapeEditions && formats.length > 0) {
+    editions = await scrapeEditionPages(page, formats, maxEditions)
+  }
+
+  // Try to get a better cover from Kindle edition (best-effort, fail-open)
+  // Skip if we already scraped editions (we have cover URLs from there)
+  if (!scrapeEditions) {
+    const betterCover = await selectBestCoverSource(page, formats, currentFormat)
+    if (betterCover) {
+      coverImageUrl = betterCover.coverImageUrl
+      coverWidth = betterCover.coverWidth
+      coverHeight = betterCover.coverHeight
+      coverSourceFormat = betterCover.coverSourceFormat
+      coverSourceAsin = betterCover.coverSourceAsin
+    }
+  } else if (editions.length > 0) {
+    // If we scraped editions, pick the best cover from them
+    const bestEditionCover = pickBestEditionCover(editions)
+    if (bestEditionCover) {
+      coverImageUrl = bestEditionCover.mainCoverUrl
+      coverWidth = bestEditionCover.coverWidth
+      coverHeight = bestEditionCover.coverHeight
+      coverSourceFormat = bestEditionCover.format
+      coverSourceAsin = bestEditionCover.asin
+    }
+  }
+
+  const { seriesName, seriesUrl, seriesPosition } = await extractSeriesInfo(page)
+  const { lexileScore, ageRangeRaw, gradeLevelRaw } = await extractReadingLevel(page)
+
+  // Parse age range into numeric values for filtering
+  const parsedAgeRange = parseAgeRange(ageRangeRaw)
+  // Parse grade level into numeric values for filtering
+  const parsedGradeLevel = parseGradeLevel(gradeLevelRaw)
 
   const bookData: BookData = {
     title,
     subtitle,
     authors,
     amazonAuthorIds,
+    contributors,
     isbn10,
     isbn13,
     asin,
@@ -42,24 +112,51 @@ export async function parseBookFromPage(page: Page): Promise<BookData> {
     pageCount,
     description,
     coverImageUrl,
+    coverWidth,
+    coverHeight,
+    coverSourceFormat,
+    coverSourceAsin,
     lexileScore,
-    ageRange,
-    gradeLevel,
+    ageRangeMin: parsedAgeRange?.min ?? null,
+    ageRangeMax: parsedAgeRange?.max ?? null,
+    ageRangeRaw,
+    gradeLevelMin: parsedGradeLevel?.min ?? null,
+    gradeLevelMax: parsedGradeLevel?.max ?? null,
+    gradeLevelRaw,
     seriesName,
     seriesUrl,
     seriesPosition,
     formats,
+    editions,
   }
 
   console.log('✅ Parsed book data:', {
     title: bookData.title,
-    authors: bookData.authors,
-    amazonAuthorIds: bookData.amazonAuthorIds,
+    contributors: bookData.contributors.map((c) => `${c.name} (${c.role})`),
     seriesName: bookData.seriesName,
     formats: bookData.formats.map((f) => f.type),
+    editions: bookData.editions.length,
+    coverSourceFormat: bookData.coverSourceFormat,
   })
 
   return bookData
+}
+
+/**
+ * Pick the best cover from scraped editions based on cover format priority.
+ */
+function pickBestEditionCover(editions: EditionData[]): EditionData | null {
+  const editionsWithCovers = editions.filter((e) => e.mainCoverUrl)
+  if (editionsWithCovers.length === 0) return null
+
+  // Sort by cover format priority
+  editionsWithCovers.sort((a, b) => {
+    const aPriority = COVER_FORMAT_PRIORITY[a.format] ?? 0
+    const bPriority = COVER_FORMAT_PRIORITY[b.format] ?? 0
+    return bPriority - aPriority
+  })
+
+  return editionsWithCovers[0]
 }
 
 /**
@@ -144,9 +241,27 @@ async function extractSubtitle(page: Page): Promise<string | null> {
   }
 }
 
-async function extractAuthors(page: Page): Promise<{ names: string[]; amazonAuthorIds: string[] }> {
+/**
+ * Parse role text like "(Author)" or "(Illustrator)" into normalized ContributorRole.
+ */
+function parseRole(roleText: string | null): ContributorRole {
+  if (!roleText) return 'author' // Default to author if no role specified
+
+  const normalized = roleText.toLowerCase().trim().replace(/[(),]/g, '')
+
+  if (normalized.includes('author')) return 'author'
+  if (normalized.includes('illustrator')) return 'illustrator'
+  if (normalized.includes('editor')) return 'editor'
+  if (normalized.includes('translator')) return 'translator'
+  if (normalized.includes('narrator')) return 'narrator'
+
+  return 'other'
+}
+
+async function extractAuthors(page: Page): Promise<{ names: string[]; amazonAuthorIds: string[]; contributors: Contributor[] }> {
   const names: string[] = []
   const amazonAuthorIds: string[] = []
+  const contributors: Contributor[] = []
 
   try {
     const contributorElements = await page.locator('#bylineInfo .author').all()
@@ -157,16 +272,42 @@ async function extractAuthors(page: Page): Promise<{ names: string[]; amazonAuth
       if (!isVisible) continue
 
       const name = await link.textContent({ timeout: textContentTimeoutMs }).catch(() => null)
-      if (name) names.push(name.trim())
+      if (!name) continue
+
+      const trimmedName = name.trim()
+      names.push(trimmedName)
 
       // Extract Amazon author ID from href (e.g., /e/B000APEZHY or /author/B000APEZHY)
+      let amazonAuthorId: string | null = null
       const href = await link.getAttribute('href', { timeout: attributeTimeoutMs }).catch(() => null)
       if (href) {
         const match = href.match(/\/(?:e|author)\/([A-Z0-9]+)/)
-        if (match && !amazonAuthorIds.includes(match[1])) {
-          amazonAuthorIds.push(match[1])
+        if (match) {
+          amazonAuthorId = match[1]
+          if (!amazonAuthorIds.includes(amazonAuthorId)) {
+            amazonAuthorIds.push(amazonAuthorId)
+          }
         }
       }
+
+      // Extract role from .contribution .a-color-secondary
+      let role: ContributorRole = 'author' // Default to author
+      try {
+        const contributionSpan = element.locator('.contribution .a-color-secondary').first()
+        const isContributionVisible = await contributionSpan.isVisible({ timeout: visibilityTimeoutMs }).catch(() => false)
+        if (isContributionVisible) {
+          const roleText = await contributionSpan.textContent({ timeout: textContentTimeoutMs }).catch(() => null)
+          role = parseRole(roleText)
+        }
+      } catch {
+        // Role extraction failed, use default
+      }
+
+      contributors.push({
+        name: trimmedName,
+        amazonAuthorId,
+        role,
+      })
     }
   } catch {
     try {
@@ -174,12 +315,25 @@ async function extractAuthors(page: Page): Promise<{ names: string[]; amazonAuth
       const isVisible = await authorLink.isVisible({ timeout: visibilityTimeoutMs }).catch(() => false)
       if (isVisible) {
         const name = await authorLink.textContent({ timeout: textContentTimeoutMs }).catch(() => null)
-        if (name) names.push(name.trim())
+        if (name) {
+          const trimmedName = name.trim()
+          names.push(trimmedName)
 
-        const href = await authorLink.getAttribute('href', { timeout: attributeTimeoutMs }).catch(() => null)
-        if (href) {
-          const match = href.match(/\/(?:e|author)\/([A-Z0-9]+)/)
-          if (match) amazonAuthorIds.push(match[1])
+          const href = await authorLink.getAttribute('href', { timeout: attributeTimeoutMs }).catch(() => null)
+          let amazonAuthorId: string | null = null
+          if (href) {
+            const match = href.match(/\/(?:e|author)\/([A-Z0-9]+)/)
+            if (match) {
+              amazonAuthorId = match[1]
+              amazonAuthorIds.push(amazonAuthorId)
+            }
+          }
+
+          contributors.push({
+            name: trimmedName,
+            amazonAuthorId,
+            role: 'author', // Default when using fallback extraction
+          })
         }
       }
     } catch {
@@ -191,7 +345,12 @@ async function extractAuthors(page: Page): Promise<{ names: string[]; amazonAuth
     console.log(`   📝 Extracted ${amazonAuthorIds.length} Amazon author IDs: ${amazonAuthorIds.join(', ')}`)
   }
 
-  return { names, amazonAuthorIds }
+  if (contributors.length > 0) {
+    const rolesSummary = contributors.map((c) => `${c.name} (${c.role})`).join(', ')
+    console.log(`   👥 Extracted ${contributors.length} contributors: ${rolesSummary}`)
+  }
+
+  return { names, amazonAuthorIds, contributors }
 }
 
 async function extractIsbns(page: Page): Promise<{ isbn10: string | null; isbn13: string | null }> {
@@ -284,7 +443,133 @@ async function extractCoverImage(page: Page): Promise<string | null> {
   }
 }
 
-async function extractSeriesInfo(page: Page): Promise<{
+/**
+ * Extract cover image URL with dimensions from data-a-dynamic-image.
+ * Returns the largest image with its width and height.
+ */
+async function extractCoverImageWithDimensions(page: Page): Promise<{
+  url: string | null
+  width: number | null
+  height: number | null
+}> {
+  try {
+    const imgElement = page.locator('#imgTagWrapperId img').first()
+    const isVisible = await imgElement.isVisible({ timeout: visibilityTimeoutMs }).catch(() => false)
+    if (!isVisible) return { url: null, width: null, height: null }
+
+    const dynamicImage = await imgElement.getAttribute('data-a-dynamic-image', { timeout: attributeTimeoutMs }).catch(() => null)
+
+    if (dynamicImage) {
+      const imageMap = JSON.parse(dynamicImage) as Record<string, [number, number]>
+      const entries = Object.entries(imageMap)
+
+      if (entries.length > 0) {
+        // Sort by total pixels (width * height), descending
+        entries.sort((a, b) => {
+          const aPixels = a[1][0] * a[1][1]
+          const bPixels = b[1][0] * b[1][1]
+          return bPixels - aPixels
+        })
+
+        const [url, [width, height]] = entries[0]
+        return { url, width, height }
+      }
+    }
+
+    // Fallback to src attribute
+    const src = await imgElement.getAttribute('src', { timeout: attributeTimeoutMs }).catch(() => null)
+    return { url: src, width: null, height: null }
+  } catch {
+    return { url: null, width: null, height: null }
+  }
+}
+
+/**
+ * Scrape edition pages to extract per-edition identifiers and cover URLs.
+ * Visits up to 4 format pages (hardcover, paperback, kindle, audiobook).
+ *
+ * @param page - Playwright page object
+ * @param formats - List of formats extracted from the main page
+ * @param maxEditions - Maximum number of edition pages to visit (default 4)
+ * @returns Array of EditionData for each visited edition
+ */
+export async function scrapeEditionPages(page: Page, formats: BookFormat[], maxEditions: number = 4): Promise<EditionData[]> {
+  const editions: EditionData[] = []
+  const startUrl = page.url()
+
+  // Sort formats by priority to visit most important first
+  const sortedFormats = [...formats].sort((a, b) => {
+    const aPriority = FORMAT_PRIORITY[a.type] ?? 0
+    const bPriority = FORMAT_PRIORITY[b.type] ?? 0
+    return bPriority - aPriority
+  })
+
+  // Limit to maxEditions
+  const formatsToVisit = sortedFormats.slice(0, maxEditions)
+
+  console.log(`📖 Scraping ${formatsToVisit.length} edition pages...`)
+
+  for (const format of formatsToVisit) {
+    try {
+      // Check if we're already on this page
+      const currentAsin = extractAsinFromUrl(page.url())
+      if (currentAsin !== format.asin) {
+        console.log(`   🔄 Navigating to ${format.type} edition (${format.asin})...`)
+        await page.goto(format.amazonUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
+        await page.waitForTimeout(1000) // Brief wait for dynamic content
+      }
+
+      // Extract identifiers
+      const { isbn10, isbn13 } = await extractIsbns(page)
+
+      // Extract cover with dimensions
+      const coverData = await extractCoverImageWithDimensions(page)
+
+      const editionData: EditionData = {
+        format: format.type,
+        asin: format.asin,
+        amazonUrl: format.amazonUrl,
+        isbn10,
+        isbn13,
+        mainCoverUrl: coverData.url,
+        coverWidth: coverData.width,
+        coverHeight: coverData.height,
+      }
+
+      editions.push(editionData)
+
+      console.log(`   ✅ ${format.type}: ISBN-10=${isbn10 ?? 'none'}, ISBN-13=${isbn13 ?? 'none'}, cover=${coverData.url ? 'yes' : 'none'}`)
+    } catch (error) {
+      console.log(`   ⚠️ Failed to scrape ${format.type} edition:`, error instanceof Error ? error.message : 'Unknown')
+
+      // Still add the edition with what we have
+      editions.push({
+        format: format.type,
+        asin: format.asin,
+        amazonUrl: format.amazonUrl,
+        isbn10: null,
+        isbn13: null,
+        mainCoverUrl: null,
+        coverWidth: null,
+        coverHeight: null,
+      })
+    }
+  }
+
+  // Navigate back to original page if we moved
+  const endAsin = extractAsinFromUrl(page.url())
+  const startAsin = extractAsinFromUrl(startUrl)
+  if (endAsin !== startAsin) {
+    console.log(`   🔙 Returning to original page...`)
+    await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
+  }
+
+  console.log(`📖 Scraped ${editions.length} editions`)
+
+  return editions
+}
+
+export async function extractSeriesInfo(page: Page): Promise<{
   seriesName: string | null
   seriesUrl: string | null
   seriesPosition: number | null
@@ -363,9 +648,7 @@ async function extractSeriesInfo(page: Page): Promise<{
         // Use evaluate for fast multi-element text extraction
         const metaText = await page.evaluate(() => {
           const selectors = ['#title', '#productSubtitle', '#bylineInfo']
-          return selectors
-            .map((s) => document.querySelector(s)?.textContent ?? '')
-            .join(' ')
+          return selectors.map((s) => document.querySelector(s)?.textContent ?? '').join(' ')
         })
 
         const seriesMatch = metaText.match(/Book\s+(\d+)\s+of\s+\d+[:\s]+([^()\n]+)/i)
@@ -400,9 +683,7 @@ async function extractSeriesInfo(page: Page): Promise<{
         // Use evaluate for fast multi-element text extraction
         const combinedText = await page.evaluate(() => {
           const selectors = ['#seriesBulletWidget_feature_div', '#seriesBullet', '#title', '#booksTitle']
-          return selectors
-            .map((s) => document.querySelector(s)?.textContent ?? '')
-            .join(' ')
+          return selectors.map((s) => document.querySelector(s)?.textContent ?? '').join(' ')
         })
         const positionMatch = combinedText.match(/Book\s+(\d+)/i)
         seriesPosition = positionMatch ? parseInt(positionMatch[1], 10) : null
@@ -429,17 +710,17 @@ async function extractSeriesInfo(page: Page): Promise<{
 
 async function extractReadingLevel(page: Page): Promise<{
   lexileScore: number | null
-  ageRange: string | null
-  gradeLevel: string | null
+  ageRangeRaw: string | null
+  gradeLevelRaw: string | null
 }> {
   const lexileRaw = await extractDetailValue(page, 'Lexile')
   const lexileMatch = lexileRaw?.match(/(\d+)L/i)
   const lexileScore = lexileMatch ? parseInt(lexileMatch[1], 10) : null
 
-  const ageRange = await extractDetailValue(page, 'Reading age')
-  const gradeLevel = await extractDetailValue(page, 'Grade level')
+  const ageRangeRaw = await extractDetailValue(page, 'Reading age')
+  const gradeLevelRaw = await extractDetailValue(page, 'Grade level')
 
-  return { lexileScore, ageRange, gradeLevel }
+  return { lexileScore, ageRangeRaw, gradeLevelRaw }
 }
 
 // --- Low-level helpers ---
@@ -480,12 +761,7 @@ async function extractFormats(page: Page): Promise<BookFormat[]> {
     // Use page.evaluate for fast extraction without individual timeouts
     const rawFormats = await page.evaluate(() => {
       const results: Array<{ href: string; text: string }> = []
-      const selectors = [
-        '#tmmSwatches a.a-button-text',
-        '#tmmSwatches span.a-button a',
-        '#mediaTab_content_landing a',
-        '.swatchElement a',
-      ]
+      const selectors = ['#tmmSwatches a.a-button-text', '#tmmSwatches span.a-button a', '#mediaTab_content_landing a', '.swatchElement a']
 
       for (const selector of selectors) {
         const elements = document.querySelectorAll(selector)
@@ -510,9 +786,7 @@ async function extractFormats(page: Page): Promise<BookFormat[]> {
       seenAsins.add(asin)
 
       const formatType = detectFormatType(text)
-      const amazonUrl = href.startsWith('http')
-        ? href
-        : `https://www.amazon.com${href}`
+      const amazonUrl = href.startsWith('http') ? href : `https://www.amazon.com${href}`
 
       formats.push({
         type: formatType,
@@ -579,4 +853,69 @@ async function detectCurrentFormat(page: Page): Promise<string> {
   }
 
   return 'unknown'
+}
+
+/**
+ * Select the best cover source from available formats.
+ * Navigates to the preferred format (Kindle > paperback > hardcover) and extracts cover.
+ *
+ * FAIL-OPEN: If navigation or extraction fails, returns null (caller keeps current cover).
+ * This function should NEVER throw or fail the overall book scrape.
+ */
+async function selectBestCoverSource(
+  page: Page,
+  formats: BookFormat[],
+  currentFormat: string | null,
+): Promise<{
+  coverImageUrl: string
+  coverWidth: number | null
+  coverHeight: number | null
+  coverSourceFormat: string
+  coverSourceAsin: string
+} | null> {
+  try {
+    if (formats.length === 0) {
+      return null
+    }
+
+    // Sort formats by cover priority (descending)
+    const sortedFormats = [...formats].sort((a, b) => {
+      const aPriority = COVER_FORMAT_PRIORITY[a.type] ?? 0
+      const bPriority = COVER_FORMAT_PRIORITY[b.type] ?? 0
+      return bPriority - aPriority
+    })
+
+    const bestFormat = sortedFormats[0]
+    const bestPriority = COVER_FORMAT_PRIORITY[bestFormat.type] ?? 0
+    const currentPriority = currentFormat ? (COVER_FORMAT_PRIORITY[currentFormat] ?? 0) : 0
+
+    // Only navigate if we have a better format available
+    if (bestPriority <= currentPriority) {
+      return null
+    }
+
+    console.log(`   🎨 Trying to get better cover from ${bestFormat.type}...`)
+    await page.goto(bestFormat.amazonUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
+    await page.waitForTimeout(1500)
+
+    // Extract cover from the new page
+    const coverData = await extractCoverImageWithDimensions(page)
+
+    if (!coverData.url) {
+      console.log(`   ⚠️ Failed to extract cover from ${bestFormat.type}, keeping current cover`)
+      return null
+    }
+
+    console.log(`   ✅ Got cover from ${bestFormat.type}`)
+    return {
+      coverImageUrl: coverData.url,
+      coverWidth: coverData.width,
+      coverHeight: coverData.height,
+      coverSourceFormat: bestFormat.type,
+      coverSourceAsin: bestFormat.asin,
+    }
+  } catch (error) {
+    console.log(`   ⚠️ Cover source selection failed:`, error instanceof Error ? error.message : 'Unknown error')
+    return null
+  }
 }

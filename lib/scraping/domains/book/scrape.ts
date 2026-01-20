@@ -1,9 +1,10 @@
-import { ScrapeResult, ScrapeOptions, Provider } from '../../types'
-import { withBrowser, navigateWithRetry } from '../../providers/playwright'
-import { extract } from '../../providers/firecrawl'
-import { BookData, bookExtractionSchema, bookExtractionPrompt } from './types'
+import { ScrapeResult, ScrapeOptions, Provider } from '@/lib/scraping/types'
+import { withBrowser, navigateWithRetry } from '@/lib/scraping/providers/playwright/browser'
+import { extract } from '@/lib/scraping/providers/firecrawl/client'
+import { BookData, BookExtractionResult, bookExtractionSchema, bookExtractionPrompt } from './types'
 import { parseBookFromPage } from './parse'
-import { extractAsinFromUrl } from '../../utils/amazon-url'
+import { parseAgeRange } from '@/lib/utils/age-range'
+import { parseGradeLevel } from '@/lib/utils/grade-level'
 
 const DEFAULT_PROVIDER: Provider = 'playwright'
 
@@ -40,7 +41,7 @@ async function scrapeBookWithPlaywright(url: string, options?: ScrapeOptions): P
 }
 
 async function scrapeBookWithFirecrawl(url: string): Promise<ScrapeResult<BookData>> {
-  const result = await extract<BookData>({
+  const result = await extract<BookExtractionResult>({
     url,
     schema: bookExtractionSchema,
     prompt: bookExtractionPrompt,
@@ -50,11 +51,21 @@ async function scrapeBookWithFirecrawl(url: string): Promise<ScrapeResult<BookDa
 
   // Normalize the response to match BookData (Firecrawl may return undefined vs null)
   // Note: Firecrawl extraction can't get amazonAuthorIds or formats from links
+  const ageRangeRaw = result.data.ageRange ?? null
+  const parsedAgeRange = parseAgeRange(ageRangeRaw)
+  const gradeLevelRaw = result.data.gradeLevel ?? null
+  const parsedGradeLevel = parseGradeLevel(gradeLevelRaw)
+
   const normalized: BookData = {
     title: result.data.title ?? null,
     subtitle: result.data.subtitle ?? null,
     authors: result.data.authors ?? [],
     amazonAuthorIds: [], // Firecrawl can't extract this from links
+    contributors: (result.data.authors ?? []).map((name) => ({
+      name,
+      amazonAuthorId: null, // Firecrawl can't extract author IDs from links
+      role: 'author' as const,
+    })),
     isbn10: result.data.isbn10 ?? null,
     isbn13: result.data.isbn13 ?? null,
     asin: result.data.asin ?? null,
@@ -63,17 +74,23 @@ async function scrapeBookWithFirecrawl(url: string): Promise<ScrapeResult<BookDa
     pageCount: result.data.pageCount ?? null,
     description: result.data.description ?? null,
     coverImageUrl: result.data.coverImageUrl ?? null,
+    coverWidth: null,
+    coverHeight: null,
+    coverSourceFormat: null, // Firecrawl can't detect format
+    coverSourceAsin: null, // Firecrawl can't detect format
     lexileScore: result.data.lexileScore ?? null,
-    ageRange: result.data.ageRange ?? null,
-    gradeLevel: result.data.gradeLevel ?? null,
+    ageRangeMin: parsedAgeRange?.min ?? null,
+    ageRangeMax: parsedAgeRange?.max ?? null,
+    ageRangeRaw,
+    gradeLevelMin: parsedGradeLevel?.min ?? null,
+    gradeLevelMax: parsedGradeLevel?.max ?? null,
+    gradeLevelRaw,
     seriesName: result.data.seriesName ?? null,
     seriesUrl: result.data.seriesUrl ?? null,
     seriesPosition: result.data.seriesPosition ?? null,
     formats: [], // Firecrawl can't extract format options
+    editions: [], // Firecrawl can't extract edition data
   }
 
   return { success: true, data: normalized }
 }
-
-// Re-export for backward compatibility
-export { extractAsinFromUrl } from '../../utils/amazon-url'
