@@ -21,6 +21,7 @@ const buttonVariants = cva(
       size: {
         default: 'h-9 px-4 py-2 has-[>svg]:px-3',
         sm: 'h-8 rounded-md gap-1.5 px-2 has-[>svg]:px-2.5',
+        xsm: 'h-7 rounded-md gap-1 px-1.5 has-[>svg]:px-2',
         lg: 'h-10 rounded-md px-6 has-[>svg]:px-4',
         icon: 'size-9',
         'icon-sm': 'size-8',
@@ -30,6 +31,7 @@ const buttonVariants = cva(
     compoundVariants: [
       { variant: 'ghost', size: 'default', class: '-mx-4' },
       { variant: 'ghost', size: 'sm', class: '-mx-2' },
+      { variant: 'ghost', size: 'xsm', class: '-mx-1.5' },
       { variant: 'ghost', size: 'lg', class: '-mx-6' },
     ],
     defaultVariants: {

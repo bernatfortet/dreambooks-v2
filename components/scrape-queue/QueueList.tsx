@@ -2,6 +2,7 @@
 
 import { useQuery, useMutation } from 'convex/react'
 import { api } from '@/convex/_generated/api'
+import type { FunctionReturnType } from 'convex/server'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -9,19 +10,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { X } from 'lucide-react'
 import type { Id } from '@/convex/_generated/dataModel'
 
-type QueueItem = {
-  _id: Id<'scrapeQueue'>
-  type: string
-  status: string
-  url: string
-  createdAt: number
-  scrapeFullSeries?: boolean
-  errorMessage?: string
-  displayName?: string
-  displayImageUrl?: string
-  referrerUrl?: string
-  referrerReason?: string
-}
+type QueueItemArray = NonNullable<FunctionReturnType<typeof api.scrapeQueue.queries.list>>
+type QueueItem = QueueItemArray[number]
 
 export function QueueList() {
   const queueItems = useQuery(api.scrapeQueue.queries.list, { limit: 50 })
