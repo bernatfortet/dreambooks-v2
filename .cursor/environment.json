@@ -1,0 +1,13 @@
+{
+  "baseImage": "ghcr.io/cursor-images/node-20:latest",
+  "env": {
+    "BUN_INSTALL": "/home/ubuntu/.bun",
+    "PLAYWRIGHT_BROWSERS_PATH": "/home/ubuntu/.cache/ms-playwright",
+    "PATH": "/home/ubuntu/.bun/bin:/home/ubuntu/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  },
+  "persistedDirectories": [
+    "/home/ubuntu/.bun",
+    "/home/ubuntu/.cache/ms-playwright"
+  ],
+  "install": "bash .cursor/setup-scraping-environment.sh"
+}

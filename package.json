@@ -4,16 +4,16 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "con": "npx convex dev",
+    "con": "bunx convex dev",
     "google": "open -na \"Google Chrome\" --args --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug-profile",
     "canary": "open -na \"Google Chrome Canary\" --args --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug-profile",
     "check-chrome": "bunx tsx scripts/worker/check-chrome.ts",
     "worker": "bunx tsx scripts/worker/index.ts",
-    "dev:all": "concurrently \"npx convex dev\" \"bun run dev\" --names \"convex,next\" --prefix-colors \"cyan,magenta\"",
+    "dev:all": "concurrently \"bunx convex dev\" \"bun run dev\" --names \"convex,next\" --prefix-colors \"cyan,magenta\"",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "check": "NODE_OPTIONS='--max-old-space-size=8192' npx tsc --noEmit",
+    "check": "NODE_OPTIONS='--max-old-space-size=8192' bunx tsc --noEmit",
     "clear": "bun scripts/clear-database.ts"
   },
   "dependencies": {

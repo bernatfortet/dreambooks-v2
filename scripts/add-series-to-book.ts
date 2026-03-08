@@ -1,11 +1,11 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env bunx tsx
 
 /**
  * Script to scrape series info from an Amazon series page and link it to an existing book.
- * Usage: npx tsx scripts/add-series-to-book.ts <bookId> <seriesUrl>
+ * Usage: bunx tsx scripts/add-series-to-book.ts <bookId> <seriesUrl>
  *
  * Example:
- *   npx tsx scripts/add-series-to-book.ts j97fwxqp6xx0j6px43am7kzt4h7z4rdk "https://www.amazon.com/dp/B0CTHRGFF7"
+ *   bunx tsx scripts/add-series-to-book.ts j97fwxqp6xx0j6px43am7kzt4h7z4rdk "https://www.amazon.com/dp/B0CTHRGFF7"
  */
 
 import { ConvexHttpClient } from 'convex/browser'
@@ -21,10 +21,10 @@ async function main() {
   const seriesUrl = process.argv[3]
 
   if (!bookId || !seriesUrl) {
-    console.error('Usage: npx tsx scripts/add-series-to-book.ts <bookId> <seriesUrl>')
+    console.error('Usage: bunx tsx scripts/add-series-to-book.ts <bookId> <seriesUrl>')
     console.error('')
     console.error('Example:')
-    console.error('  npx tsx scripts/add-series-to-book.ts j97fwxqp6xx0j6px43am7kzt4h7z4rdk "https://www.amazon.com/dp/B0CTHRGFF7"')
+    console.error('  bunx tsx scripts/add-series-to-book.ts j97fwxqp6xx0j6px43am7kzt4h7z4rdk "https://www.amazon.com/dp/B0CTHRGFF7"')
     process.exit(1)
   }
 
