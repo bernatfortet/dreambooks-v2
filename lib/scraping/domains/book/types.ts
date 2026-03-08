@@ -48,6 +48,7 @@ export type Contributor = {
 
 export type BookData = {
   title: string | null
+  subtitle?: string | null
   authors: string[] // Kept for backward compatibility - derived from contributors
   // Amazon author IDs extracted from byline links - used for linking to authors table
   amazonAuthorIds: string[] // Kept for backward compatibility - derived from contributors
