@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 import { BookList } from '@/components/books/BookList'
 import { BookSubmitForm } from '@/components/books/BookSubmitForm'
+import { useConvexPageState } from '@/components/convex/useConvexPageState'
 import { QueueList } from '@/components/scrape-queue/QueueList'
 import { SeriesList } from '@/components/series/SeriesList'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -11,11 +12,7 @@ import { PageContainer } from '@/components/ui/PageContainer'
 
 export default function Client() {
   const [url, setUrl] = useState('')
-  const [isMounted, setIsMounted] = useState(false)
-
-  useEffect(() => {
-    setIsMounted(true)
-  }, [])
+  const { canRenderConvex, hasConvexUrl, isMounted } = useConvexPageState()
 
   if (!isMounted) {
     return (
@@ -27,6 +24,19 @@ export default function Client() {
       </PageContainer>
     )
   }
+
+  if (!hasConvexUrl) {
+    return (
+      <PageContainer className='space-y-8'>
+        <div className='space-y-2'>
+          <h1 className='text-3xl font-bold tracking-tight'>Admin</h1>
+          <p className='text-muted-foreground'>Set NEXT_PUBLIC_CONVEX_URL in Vercel to load the admin dashboard.</p>
+        </div>
+      </PageContainer>
+    )
+  }
+
+  if (!canRenderConvex) return null
 
   return (
     <PageContainer className='space-y-8'>
