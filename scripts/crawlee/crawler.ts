@@ -19,6 +19,7 @@ export async function runCrawlerRequests(params: {
   source: LocalScrapeSource
 }): Promise<DemoRunResult[]> {
   const results: DemoRunResult[] = []
+  const failedRequests: Array<{ type: DemoRequestUserData['type']; url: string; errors: string[] }> = []
   const { requests, dryRun, headless, source } = params
 
   async function handleRequest(context: PlaywrightCrawlingContext): Promise<void> {
@@ -33,11 +34,18 @@ export async function runCrawlerRequests(params: {
 
   async function handleFailedRequest(context: PlaywrightCrawlingContext): Promise<void> {
     const requestType = getRequestType(context)
+    const errors = context.request.errorMessages
 
     console.error('🚨 Crawlee demo request failed', {
       type: requestType,
       url: context.request.url,
-      errors: context.request.errorMessages,
+      errors,
+    })
+
+    failedRequests.push({
+      type: requestType,
+      url: context.request.url,
+      errors,
     })
   }
 
@@ -56,6 +64,10 @@ export async function runCrawlerRequests(params: {
   })
 
   await crawler.run(requests)
+
+  if (failedRequests.length > 0) {
+    throw new Error(formatFailedRequestsError(failedRequests))
+  }
 
   return results
 }
@@ -87,4 +99,20 @@ function getRequestType(context: PlaywrightCrawlingContext): DemoRequestUserData
   }
 
   throw new Error(`Unsupported demo request type for ${context.request.url}`)
+}
+
+function formatFailedRequestsError(
+  failedRequests: Array<{ type: DemoRequestUserData['type']; url: string; errors: string[] }>,
+): string {
+  const lines = failedRequests.flatMap((request, index) => {
+    const errorLines =
+      request.errors.length > 0 ? request.errors.map((error) => `    - ${error}`) : ['    - Unknown error']
+
+    return [
+      `${index + 1}. ${request.type} ${request.url}`,
+      ...errorLines,
+    ]
+  })
+
+  return `Crawlee demo failed for ${failedRequests.length} request(s):\n${lines.join('\n')}`
 }

@@ -100,13 +100,26 @@ export async function importBookToConvex(params: {
       : undefined,
   }
 
-  const result = await client.action(api.scraping.importBook.importFromLocalScrape, {
-    scrapedData: cleanedData,
-    apiKey,
-    scrapeSource: source,
-    skipCoverDownload,
-    firstSeenFromUrl: params.firstSeenFromUrl,
-    firstSeenReason: params.firstSeenReason,
+  const result = await runWithLegacyScrapeSourceFallback({
+    operationLabel: 'import book',
+    source,
+    runWithSource: () =>
+      client.action(api.scraping.importBook.importFromLocalScrape, {
+        scrapedData: cleanedData,
+        apiKey,
+        scrapeSource: source,
+        skipCoverDownload,
+        firstSeenFromUrl: params.firstSeenFromUrl,
+        firstSeenReason: params.firstSeenReason,
+      }),
+    runWithoutSource: () =>
+      client.action(api.scraping.importBook.importFromLocalScrape, {
+        scrapedData: cleanedData,
+        apiKey,
+        skipCoverDownload,
+        firstSeenFromUrl: params.firstSeenFromUrl,
+        firstSeenReason: params.firstSeenReason,
+      }),
   })
 
   console.log('✅ Book imported to Convex', { bookId: result.bookId, isNew: result.isNew })
@@ -138,18 +151,36 @@ export async function importAuthorToConvex(params: {
     amazonAuthorId: params.authorData.amazonAuthorId,
   })
 
-  const result = await client.action(api.scraping.importAuthor.importFromLocalScrape, {
-    authorData: {
-      name: params.authorData.name,
-      bio: params.authorData.bio ?? undefined,
-      amazonAuthorId: params.authorData.amazonAuthorId,
-      sourceUrl: params.sourceUrl,
-      imageUrl: params.authorData.imageUrl ?? undefined,
-    },
-    apiKey,
-    scrapeSource: source,
-    firstSeenFromUrl: params.firstSeenFromUrl,
-    firstSeenReason: params.firstSeenReason,
+  const result = await runWithLegacyScrapeSourceFallback({
+    operationLabel: 'import author',
+    source,
+    runWithSource: () =>
+      client.action(api.scraping.importAuthor.importFromLocalScrape, {
+        authorData: {
+          name: params.authorData.name,
+          bio: params.authorData.bio ?? undefined,
+          amazonAuthorId: params.authorData.amazonAuthorId,
+          sourceUrl: params.sourceUrl,
+          imageUrl: params.authorData.imageUrl ?? undefined,
+        },
+        apiKey,
+        scrapeSource: source,
+        firstSeenFromUrl: params.firstSeenFromUrl,
+        firstSeenReason: params.firstSeenReason,
+      }),
+    runWithoutSource: () =>
+      client.action(api.scraping.importAuthor.importFromLocalScrape, {
+        authorData: {
+          name: params.authorData.name,
+          bio: params.authorData.bio ?? undefined,
+          amazonAuthorId: params.authorData.amazonAuthorId,
+          sourceUrl: params.sourceUrl,
+          imageUrl: params.authorData.imageUrl ?? undefined,
+        },
+        apiKey,
+        firstSeenFromUrl: params.firstSeenFromUrl,
+        firstSeenReason: params.firstSeenReason,
+      }),
   })
 
   console.log('✅ Author imported to Convex', {
@@ -191,32 +222,64 @@ export async function saveSeriesToConvex(params: {
     firstSeenReason: params.firstSeenReason,
   })
 
-  const saveResult = await client.mutation(api.series.mutations.saveFromCliScrape, {
-    seriesId: seriesId as Id<'series'>,
-    seriesName: params.seriesData.name,
-    sourceUrl: params.sourceUrl,
-    scrapeSource: source,
-    description: params.seriesData.description ?? undefined,
-    coverImageUrl: params.seriesData.coverImageUrl ?? undefined,
-    expectedBookCount: params.seriesData.totalBooks ?? undefined,
-    skipCoverDownload: params.skipCoverDownload,
-    books: params.seriesData.books
-      .filter((book) => book.amazonUrl && book.format !== 'audiobook')
-      .map((book) => ({
-        title: book.title ?? 'Unknown Title',
-        amazonUrl: book.amazonUrl!,
-        asin: book.asin ?? undefined,
-        position: book.position ?? undefined,
-        coverImageUrl: book.coverImageUrl ?? undefined,
-        authors: book.authors.length > 0 ? book.authors : undefined,
-      })),
-    pagination: params.seriesData.pagination
-      ? {
-          currentPage: params.seriesData.pagination.currentPage,
-          totalPages: params.seriesData.pagination.totalPages ?? undefined,
-          nextPageUrl: params.seriesData.pagination.nextPageUrl ?? undefined,
-        }
-      : undefined,
+  const saveResult = await runWithLegacyScrapeSourceFallback({
+    operationLabel: 'save series scrape',
+    source,
+    runWithSource: () =>
+      client.mutation(api.series.mutations.saveFromCliScrape, {
+        seriesId: seriesId as Id<'series'>,
+        seriesName: params.seriesData.name,
+        sourceUrl: params.sourceUrl,
+        scrapeSource: source,
+        description: params.seriesData.description ?? undefined,
+        coverImageUrl: params.seriesData.coverImageUrl ?? undefined,
+        expectedBookCount: params.seriesData.totalBooks ?? undefined,
+        skipCoverDownload: params.skipCoverDownload,
+        books: params.seriesData.books
+          .filter((book) => book.amazonUrl && book.format !== 'audiobook')
+          .map((book) => ({
+            title: book.title ?? 'Unknown Title',
+            amazonUrl: book.amazonUrl!,
+            asin: book.asin ?? undefined,
+            position: book.position ?? undefined,
+            coverImageUrl: book.coverImageUrl ?? undefined,
+            authors: book.authors.length > 0 ? book.authors : undefined,
+          })),
+        pagination: params.seriesData.pagination
+          ? {
+              currentPage: params.seriesData.pagination.currentPage,
+              totalPages: params.seriesData.pagination.totalPages ?? undefined,
+              nextPageUrl: params.seriesData.pagination.nextPageUrl ?? undefined,
+            }
+          : undefined,
+      }),
+    runWithoutSource: () =>
+      client.mutation(api.series.mutations.saveFromCliScrape, {
+        seriesId: seriesId as Id<'series'>,
+        seriesName: params.seriesData.name,
+        sourceUrl: params.sourceUrl,
+        description: params.seriesData.description ?? undefined,
+        coverImageUrl: params.seriesData.coverImageUrl ?? undefined,
+        expectedBookCount: params.seriesData.totalBooks ?? undefined,
+        skipCoverDownload: params.skipCoverDownload,
+        books: params.seriesData.books
+          .filter((book) => book.amazonUrl && book.format !== 'audiobook')
+          .map((book) => ({
+            title: book.title ?? 'Unknown Title',
+            amazonUrl: book.amazonUrl!,
+            asin: book.asin ?? undefined,
+            position: book.position ?? undefined,
+            coverImageUrl: book.coverImageUrl ?? undefined,
+            authors: book.authors.length > 0 ? book.authors : undefined,
+          })),
+        pagination: params.seriesData.pagination
+          ? {
+              currentPage: params.seriesData.pagination.currentPage,
+              totalPages: params.seriesData.pagination.totalPages ?? undefined,
+              nextPageUrl: params.seriesData.pagination.nextPageUrl ?? undefined,
+            }
+          : undefined,
+      }),
   })
 
   console.log('✅ Series saved to Convex', {
@@ -253,4 +316,31 @@ function getScrapeImportKey(): string {
   }
 
   return apiKey
+}
+
+async function runWithLegacyScrapeSourceFallback<T>(params: {
+  operationLabel: string
+  source: LocalScrapeSource
+  runWithSource: () => Promise<T>
+  runWithoutSource: () => Promise<T>
+}): Promise<T> {
+  try {
+    return await params.runWithSource()
+  } catch (error) {
+    if (!isLegacyScrapeSourceValidationError(error)) {
+      throw error
+    }
+
+    console.warn(
+      `⚠️ Convex backend rejected scrapeSource="${params.source}" while trying to ${params.operationLabel}. Retrying without scrapeSource for backward compatibility.`,
+    )
+
+    return await params.runWithoutSource()
+  }
+}
+
+function isLegacyScrapeSourceValidationError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+
+  return error.message.includes('Object contains extra field `scrapeSource`')
 }
