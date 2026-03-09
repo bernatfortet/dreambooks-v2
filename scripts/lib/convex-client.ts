@@ -1,10 +1,28 @@
 import { ConvexHttpClient } from 'convex/browser'
 import { api } from '@/convex/_generated/api'
-import { BookData } from '@/lib/scraping'
+import type { AuthorData } from '@/lib/scraping/domains/author/types'
+import type { BookData } from '@/lib/scraping/domains/book/types'
+import type { SeriesData } from '@/lib/scraping/domains/series/types'
+import { DEFAULT_LOCAL_SCRAPE_SOURCE, type LocalScrapeSource } from '@/lib/scraping/local-source'
+import type { Id } from '@/convex/_generated/dataModel'
 
-type ImportResult = {
+type ImportBookResult = {
   bookId: string
   isNew: boolean
+}
+
+type ImportAuthorResult = {
+  authorId: string
+  isNew: boolean
+  booksLinked: number
+}
+
+type SaveSeriesResult = {
+  seriesId: string
+  booksFound: number
+  pending: number
+  skipped: number
+  hasMorePages: boolean
 }
 
 export async function importBookToConvex(params: {
@@ -13,23 +31,14 @@ export async function importBookToConvex(params: {
   skipCoverDownload?: boolean
   firstSeenFromUrl?: string
   firstSeenReason?: string
-}): Promise<ImportResult> {
+  source?: LocalScrapeSource
+}): Promise<ImportBookResult> {
+  const client = getConvexClient()
+  const apiKey = getScrapeImportKey()
   const { scrapedData, amazonUrl, skipCoverDownload } = params
-
-  const convexUrl = process.env.CONVEX_URL
-  const apiKey = process.env.SCRAPE_IMPORT_KEY
-
-  if (!convexUrl) {
-    throw new Error('CONVEX_URL environment variable is not set')
-  }
-
-  if (!apiKey) {
-    throw new Error('SCRAPE_IMPORT_KEY environment variable is not set')
-  }
+  const source = params.source ?? DEFAULT_LOCAL_SCRAPE_SOURCE
 
   console.log('🌀 Importing book to Convex...', { title: scrapedData.title })
-
-  const client = new ConvexHttpClient(convexUrl)
 
   // Validate required fields
   if (!scrapedData.title) {
@@ -46,7 +55,13 @@ export async function importBookToConvex(params: {
     subtitle: scrapedData.subtitle ?? undefined,
     authors: scrapedData.authors,
     amazonAuthorIds: scrapedData.amazonAuthorIds?.length ? scrapedData.amazonAuthorIds : undefined,
-    contributors: scrapedData.contributors?.length ? scrapedData.contributors : undefined,
+    contributors: scrapedData.contributors?.length
+      ? scrapedData.contributors.map((contributor) => ({
+          name: contributor.name,
+          amazonAuthorId: contributor.amazonAuthorId ?? undefined,
+          role: contributor.role,
+        }))
+      : undefined,
     isbn10: scrapedData.isbn10 ?? undefined,
     isbn13: scrapedData.isbn13 ?? undefined,
     asin: scrapedData.asin ?? undefined,
@@ -85,15 +100,247 @@ export async function importBookToConvex(params: {
       : undefined,
   }
 
-  const result = await client.action(api.scraping.importBook.importFromLocalScrape, {
-    scrapedData: cleanedData,
-    apiKey,
-    skipCoverDownload,
-    firstSeenFromUrl: params.firstSeenFromUrl,
-    firstSeenReason: params.firstSeenReason,
+  const result = await runWithLegacyScrapeSourceFallback({
+    operationLabel: 'import book',
+    source,
+    runWithSource: () =>
+      client.action(api.scraping.importBook.importFromLocalScrape, {
+        scrapedData: cleanedData,
+        apiKey,
+        scrapeSource: source,
+        skipCoverDownload,
+        firstSeenFromUrl: params.firstSeenFromUrl,
+        firstSeenReason: params.firstSeenReason,
+      }),
+    runWithoutSource: () =>
+      client.action(api.scraping.importBook.importFromLocalScrape, {
+        scrapedData: cleanedData,
+        apiKey,
+        skipCoverDownload,
+        firstSeenFromUrl: params.firstSeenFromUrl,
+        firstSeenReason: params.firstSeenReason,
+      }),
   })
 
   console.log('✅ Book imported to Convex', { bookId: result.bookId, isNew: result.isNew })
 
   return result
+}
+
+export async function importAuthorToConvex(params: {
+  authorData: Pick<AuthorData, 'name' | 'bio' | 'imageUrl' | 'amazonAuthorId'>
+  sourceUrl: string
+  firstSeenFromUrl?: string
+  firstSeenReason?: string
+  source?: LocalScrapeSource
+}): Promise<ImportAuthorResult> {
+  const client = getConvexClient()
+  const apiKey = getScrapeImportKey()
+  const source = params.source ?? DEFAULT_LOCAL_SCRAPE_SOURCE
+
+  if (!params.authorData.name) {
+    throw new Error('Missing required field: name')
+  }
+
+  if (!params.authorData.amazonAuthorId) {
+    throw new Error('Missing required field: amazonAuthorId')
+  }
+
+  console.log('🌀 Importing author to Convex...', {
+    name: params.authorData.name,
+    amazonAuthorId: params.authorData.amazonAuthorId,
+  })
+
+  const result = await runWithLegacyScrapeSourceFallback({
+    operationLabel: 'import author',
+    source,
+    runWithSource: () =>
+      client.action(api.scraping.importAuthor.importFromLocalScrape, {
+        authorData: {
+          name: params.authorData.name,
+          bio: params.authorData.bio ?? undefined,
+          amazonAuthorId: params.authorData.amazonAuthorId,
+          sourceUrl: params.sourceUrl,
+          imageUrl: params.authorData.imageUrl ?? undefined,
+        },
+        apiKey,
+        scrapeSource: source,
+        firstSeenFromUrl: params.firstSeenFromUrl,
+        firstSeenReason: params.firstSeenReason,
+      }),
+    runWithoutSource: () =>
+      client.action(api.scraping.importAuthor.importFromLocalScrape, {
+        authorData: {
+          name: params.authorData.name,
+          bio: params.authorData.bio ?? undefined,
+          amazonAuthorId: params.authorData.amazonAuthorId,
+          sourceUrl: params.sourceUrl,
+          imageUrl: params.authorData.imageUrl ?? undefined,
+        },
+        apiKey,
+        firstSeenFromUrl: params.firstSeenFromUrl,
+        firstSeenReason: params.firstSeenReason,
+      }),
+  })
+
+  console.log('✅ Author imported to Convex', {
+    authorId: result.authorId,
+    isNew: result.isNew,
+    booksLinked: result.booksLinked,
+  })
+
+  return result
+}
+
+export async function saveSeriesToConvex(params: {
+  seriesData: SeriesData
+  sourceUrl: string
+  skipCoverDownload?: boolean
+  firstSeenFromUrl?: string
+  firstSeenReason?: string
+  source?: LocalScrapeSource
+}): Promise<SaveSeriesResult> {
+  const client = getConvexClient()
+  const source = params.source ?? DEFAULT_LOCAL_SCRAPE_SOURCE
+
+  if (!params.seriesData.name) {
+    throw new Error('Missing required field: name')
+  }
+
+  console.log('🌀 Saving series to Convex...', {
+    name: params.seriesData.name,
+    sourceUrl: params.sourceUrl,
+  })
+
+  const seriesId = await client.mutation(api.series.mutations.upsertFromUrl, {
+    name: params.seriesData.name,
+    sourceUrl: params.sourceUrl,
+    description: params.seriesData.description ?? undefined,
+    coverImageUrl: params.seriesData.coverImageUrl ?? undefined,
+    skipCoverDownload: params.skipCoverDownload,
+    firstSeenFromUrl: params.firstSeenFromUrl,
+    firstSeenReason: params.firstSeenReason,
+  })
+
+  const saveResult = await runWithLegacyScrapeSourceFallback({
+    operationLabel: 'save series scrape',
+    source,
+    runWithSource: () =>
+      client.mutation(api.series.mutations.saveFromCliScrape, {
+        seriesId: seriesId as Id<'series'>,
+        seriesName: params.seriesData.name,
+        sourceUrl: params.sourceUrl,
+        scrapeSource: source,
+        description: params.seriesData.description ?? undefined,
+        coverImageUrl: params.seriesData.coverImageUrl ?? undefined,
+        expectedBookCount: params.seriesData.totalBooks ?? undefined,
+        skipCoverDownload: params.skipCoverDownload,
+        books: params.seriesData.books
+          .filter((book) => book.amazonUrl && book.format !== 'audiobook')
+          .map((book) => ({
+            title: book.title ?? 'Unknown Title',
+            amazonUrl: book.amazonUrl!,
+            asin: book.asin ?? undefined,
+            position: book.position ?? undefined,
+            coverImageUrl: book.coverImageUrl ?? undefined,
+            authors: book.authors.length > 0 ? book.authors : undefined,
+          })),
+        pagination: params.seriesData.pagination
+          ? {
+              currentPage: params.seriesData.pagination.currentPage,
+              totalPages: params.seriesData.pagination.totalPages ?? undefined,
+              nextPageUrl: params.seriesData.pagination.nextPageUrl ?? undefined,
+            }
+          : undefined,
+      }),
+    runWithoutSource: () =>
+      client.mutation(api.series.mutations.saveFromCliScrape, {
+        seriesId: seriesId as Id<'series'>,
+        seriesName: params.seriesData.name,
+        sourceUrl: params.sourceUrl,
+        description: params.seriesData.description ?? undefined,
+        coverImageUrl: params.seriesData.coverImageUrl ?? undefined,
+        expectedBookCount: params.seriesData.totalBooks ?? undefined,
+        skipCoverDownload: params.skipCoverDownload,
+        books: params.seriesData.books
+          .filter((book) => book.amazonUrl && book.format !== 'audiobook')
+          .map((book) => ({
+            title: book.title ?? 'Unknown Title',
+            amazonUrl: book.amazonUrl!,
+            asin: book.asin ?? undefined,
+            position: book.position ?? undefined,
+            coverImageUrl: book.coverImageUrl ?? undefined,
+            authors: book.authors.length > 0 ? book.authors : undefined,
+          })),
+        pagination: params.seriesData.pagination
+          ? {
+              currentPage: params.seriesData.pagination.currentPage,
+              totalPages: params.seriesData.pagination.totalPages ?? undefined,
+              nextPageUrl: params.seriesData.pagination.nextPageUrl ?? undefined,
+            }
+          : undefined,
+      }),
+  })
+
+  console.log('✅ Series saved to Convex', {
+    seriesId,
+    booksFound: saveResult.booksFound,
+    pending: saveResult.pending,
+    skipped: saveResult.skipped,
+  })
+
+  return {
+    seriesId,
+    booksFound: saveResult.booksFound,
+    pending: saveResult.pending,
+    skipped: saveResult.skipped,
+    hasMorePages: saveResult.hasMorePages,
+  }
+}
+
+function getConvexClient(): ConvexHttpClient {
+  const convexUrl = process.env.CONVEX_URL
+
+  if (!convexUrl) {
+    throw new Error('CONVEX_URL environment variable is not set')
+  }
+
+  return new ConvexHttpClient(convexUrl)
+}
+
+function getScrapeImportKey(): string {
+  const apiKey = process.env.SCRAPE_IMPORT_KEY
+
+  if (!apiKey) {
+    throw new Error('SCRAPE_IMPORT_KEY environment variable is not set')
+  }
+
+  return apiKey
+}
+
+async function runWithLegacyScrapeSourceFallback<T>(params: {
+  operationLabel: string
+  source: LocalScrapeSource
+  runWithSource: () => Promise<T>
+  runWithoutSource: () => Promise<T>
+}): Promise<T> {
+  try {
+    return await params.runWithSource()
+  } catch (error) {
+    if (!isLegacyScrapeSourceValidationError(error)) {
+      throw error
+    }
+
+    console.warn(
+      `⚠️ Convex backend rejected scrapeSource="${params.source}" while trying to ${params.operationLabel}. Retrying without scrapeSource for backward compatibility.`,
+    )
+
+    return await params.runWithoutSource()
+  }
+}
+
+function isLegacyScrapeSourceValidationError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+
+  return error.message.includes('Object contains extra field `scrapeSource`')
 }

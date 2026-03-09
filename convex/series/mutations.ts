@@ -8,6 +8,7 @@ import { internal } from '../_generated/api'
 import { SCRAPE_VERSIONS } from '../lib/scrapeVersions'
 import { generateUniqueSlug, generateUniqueBookSlug } from '../lib/slug'
 import { deleteScrapeArtifacts, clearScrapeQueueReferences, deleteStorageFile } from '../lib/deleteHelpers'
+import { DEFAULT_LOCAL_SCRAPE_SOURCE, LOCAL_SCRAPE_SOURCES } from '@/lib/scraping/local-source'
 
 // Type for book entry in series scrape
 type SeriesBookEntry = {
@@ -18,6 +19,11 @@ type SeriesBookEntry = {
   coverImageUrl?: string
   authors?: string[]
 }
+
+const localScrapeSourceValidator = v.union(
+  v.literal(LOCAL_SCRAPE_SOURCES.playwright),
+  v.literal(LOCAL_SCRAPE_SOURCES.crawlee),
+)
 
 /**
  * Find existing series by various identifiers.
@@ -738,6 +744,7 @@ export const saveFromCliScrape = mutation({
     seriesId: v.id('series'),
     seriesName: v.string(),
     sourceUrl: v.optional(v.string()),
+    scrapeSource: v.optional(localScrapeSourceValidator),
     description: v.optional(v.string()),
     coverImageUrl: v.optional(v.string()),
     expectedBookCount: v.optional(v.number()),
@@ -768,6 +775,8 @@ export const saveFromCliScrape = mutation({
     hasMorePages: v.boolean(),
   }),
   handler: async (context, args) => {
+    const scrapeSource = args.scrapeSource ?? DEFAULT_LOCAL_SCRAPE_SOURCE
+
     console.log('💾 Saving CLI scrape results', { seriesId: args.seriesId, books: args.books.length })
 
     let pendingCount = 0
@@ -792,7 +801,7 @@ export const saveFromCliScrape = mutation({
       entityType: 'series',
       entityId: args.seriesId,
       sourceUrl: args.pagination?.nextPageUrl ? 'series-page' : 'series-root',
-      adapter: 'playwright-local',
+      adapter: scrapeSource,
       scrapeVersion: args.scrapeVersion ?? SCRAPE_VERSIONS.series,
       payloadJson: JSON.stringify({
         seriesId: args.seriesId,

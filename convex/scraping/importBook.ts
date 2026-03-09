@@ -5,6 +5,7 @@ import { internal } from '../_generated/api'
 import { v } from 'convex/values'
 import { Id } from '../_generated/dataModel'
 import { SCRAPE_VERSIONS } from '../lib/scrapeVersions'
+import { DEFAULT_LOCAL_SCRAPE_SOURCE, LOCAL_SCRAPE_SOURCES } from '@/lib/scraping/local-source'
 
 // Validator for edition data
 const editionDataValidator = v.object({
@@ -17,6 +18,11 @@ const editionDataValidator = v.object({
   coverWidth: v.optional(v.number()),
   coverHeight: v.optional(v.number()),
 })
+
+const localScrapeSourceValidator = v.union(
+  v.literal(LOCAL_SCRAPE_SOURCES.playwright),
+  v.literal(LOCAL_SCRAPE_SOURCES.crawlee),
+)
 
 // Validator for scraped book data from local Playwright scraper
 const scrapedBookDataValidator = v.object({
@@ -84,10 +90,15 @@ export const importFromLocalScrape = action({
   args: {
     scrapedData: scrapedBookDataValidator,
     apiKey: v.string(),
+    scrapeSource: v.optional(localScrapeSourceValidator),
     skipCoverDownload: v.optional(v.boolean()),
     firstSeenFromUrl: v.optional(v.string()),
     firstSeenReason: v.optional(v.string()),
   },
+  returns: v.object({
+    bookId: v.id('books'),
+    isNew: v.boolean(),
+  }),
   handler: async (context, args): Promise<{ bookId: Id<'books'>; isNew: boolean }> => {
     // Validate API key
     const expectedKey = process.env.SCRAPE_IMPORT_KEY
@@ -99,13 +110,15 @@ export const importFromLocalScrape = action({
       throw new Error('Invalid API key')
     }
 
+    const scrapeSource = args.scrapeSource ?? DEFAULT_LOCAL_SCRAPE_SOURCE
+
     console.log('🏁 Importing book from local scrape', { title: args.scrapedData.title })
 
     // Store the produced object offline for debugging/version comparisons
     await context.runMutation(internal.scraping.artifacts.create, {
       entityType: 'book',
       sourceUrl: args.scrapedData.amazonUrl ?? '(unknown)',
-      adapter: 'playwright-local',
+      adapter: scrapeSource,
       scrapeVersion: SCRAPE_VERSIONS.book,
       payloadJson: JSON.stringify(args.scrapedData),
     })
@@ -154,7 +167,7 @@ export const importFromLocalScrape = action({
       gradeLevelMin: args.scrapedData.gradeLevelMin,
       gradeLevelMax: args.scrapedData.gradeLevelMax,
       gradeLevel: args.scrapedData.gradeLevel,
-      source: 'playwright-local',
+      source: scrapeSource,
       scrapeVersion: SCRAPE_VERSIONS.book,
       detailsStatus: 'complete',
       coverStatus: args.scrapedData.coverImageUrl ? 'pending' : 'error',

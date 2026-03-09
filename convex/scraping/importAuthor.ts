@@ -5,6 +5,7 @@ import { internal } from '../_generated/api'
 import { v } from 'convex/values'
 import { Id } from '../_generated/dataModel'
 import { SCRAPE_VERSIONS } from '../lib/scrapeVersions'
+import { DEFAULT_LOCAL_SCRAPE_SOURCE, LOCAL_SCRAPE_SOURCES } from '@/lib/scraping/local-source'
 
 // Validator for scraped author data from local Playwright scraper
 const scrapedAuthorDataValidator = v.object({
@@ -15,6 +16,11 @@ const scrapedAuthorDataValidator = v.object({
   imageUrl: v.optional(v.string()),
 })
 
+const localScrapeSourceValidator = v.union(
+  v.literal(LOCAL_SCRAPE_SOURCES.playwright),
+  v.literal(LOCAL_SCRAPE_SOURCES.crawlee),
+)
+
 /**
  * Public action for importing author data from local Playwright scraper.
  * Requires SCRAPE_IMPORT_KEY environment variable for authentication.
@@ -23,9 +29,15 @@ export const importFromLocalScrape = action({
   args: {
     authorData: scrapedAuthorDataValidator,
     apiKey: v.string(),
+    scrapeSource: v.optional(localScrapeSourceValidator),
     firstSeenFromUrl: v.optional(v.string()),
     firstSeenReason: v.optional(v.string()),
   },
+  returns: v.object({
+    authorId: v.id('authors'),
+    isNew: v.boolean(),
+    booksLinked: v.number(),
+  }),
   handler: async (context, args): Promise<{ authorId: Id<'authors'>; isNew: boolean; booksLinked: number }> => {
     // Validate API key
     const expectedKey = process.env.SCRAPE_IMPORT_KEY
@@ -37,6 +49,8 @@ export const importFromLocalScrape = action({
       throw new Error('Invalid API key')
     }
 
+    const scrapeSource = args.scrapeSource ?? DEFAULT_LOCAL_SCRAPE_SOURCE
+
     console.log('🏁 Importing author from local scrape', {
       name: args.authorData.name,
       amazonAuthorId: args.authorData.amazonAuthorId,
@@ -46,7 +60,7 @@ export const importFromLocalScrape = action({
     await context.runMutation(internal.scraping.artifacts.create, {
       entityType: 'author',
       sourceUrl: args.authorData.sourceUrl ?? '(unknown)',
-      adapter: 'playwright-local',
+      adapter: scrapeSource,
       scrapeVersion: SCRAPE_VERSIONS.author,
       payloadJson: JSON.stringify(args.authorData),
     })
