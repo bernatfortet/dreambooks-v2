@@ -22,6 +22,12 @@
 - **Convex function deployment**: Deploying Convex functions (`npx convex dev`) requires interactive CLI authentication. In headless environments, this is not available. The frontend connects directly to the cloud Convex deployment via `NEXT_PUBLIC_CONVEX_URL`.
 - **`bun run build` vs `bun run dev`**: The production build runs TypeScript strict checking and will fail on the missing `convex/lib/` modules. The dev server (`bun run dev`) works fine.
 
+### Playwright / scraping
+
+- Playwright Chromium is installed by the update script (`bunx playwright install --with-deps chromium`).
+- The scraping worker (`bun run worker`) connects to an existing Chrome instance via CDP on port 9222 — it does **not** use the bundled Playwright Chromium. To use it, launch Chrome with `google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug-profile`.
+- Playwright Chromium is still useful for headless scraping scripts and tests that launch their own browser via `chromium.launch()`.
+
 ### Available commands
 
 See `package.json` scripts. Key ones:
@@ -29,6 +35,7 @@ See `package.json` scripts. Key ones:
 - `bun run lint` — ESLint (has pre-existing warnings/errors)
 - `bun run check` — TypeScript type-check (has pre-existing errors from missing convex/lib files)
 - `bun run build` — Production build (fails due to pre-existing TS errors)
+- `bun run worker` — Scraping worker (requires Chrome with CDP on port 9222)
 
 ### Environment secrets
 
