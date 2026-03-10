@@ -3,6 +3,7 @@
 import { use } from 'react'
 import Link from 'next/link'
 import { useQuery } from 'convex/react'
+import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
 import { DataDebugPanel } from '@/components/ui/DataDebugPanel'
 import { BookCard } from '@/components/books/BookCard'
@@ -11,6 +12,9 @@ import { PageContainer } from '@/components/ui/PageContainer'
 type PublisherPageProps = {
   params: Promise<{ slug: string }>
 }
+
+type PublisherPageData = NonNullable<FunctionReturnType<typeof api.publishers.queries.getBySlugWithBooks>>
+type PublisherBook = PublisherPageData['books'][number]
 
 export default function PublisherPage({ params }: PublisherPageProps) {
   const { slug } = use(params)
@@ -49,7 +53,7 @@ export default function PublisherPage({ params }: PublisherPageProps) {
         <p className='text-muted-foreground'>No books from this publisher yet.</p>
       ) : (
         <div className='grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4'>
-          {publisher.books.map((book) => (
+          {publisher.books.map((book: PublisherBook) => (
             <BookCard
               key={book._id}
               slug={book.slug ?? book._id}

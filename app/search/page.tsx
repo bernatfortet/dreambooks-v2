@@ -3,12 +3,17 @@
 import { useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useQuery } from 'convex/react'
+import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
 import Link from 'next/link'
 import { BookGridList, BookGridSkeleton } from '@/components/books/BookGrid'
 import { SeriesGridItem } from '@/components/series/SeriesGrid'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PageContainer } from '@/components/ui/PageContainer'
+
+type SearchResults = NonNullable<FunctionReturnType<typeof api.search.queries.global>>
+type SearchSeries = SearchResults['series'][number]
+type SearchAuthor = SearchResults['authors'][number]
 
 export default function SearchPage() {
   const searchParams = useSearchParams()
@@ -77,7 +82,7 @@ export default function SearchPage() {
             <section>
               <h2 className='text-2xl font-semibold mb-4'>Series ({results.series.length})</h2>
               <div className='grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4'>
-                {results.series.map((series) => (
+                {results.series.map((series: SearchSeries) => (
                   <SeriesGridItem key={series._id} slug={series.slug ?? series._id} name={series.name} coverUrl={series.coverUrl} />
                 ))}
               </div>
@@ -95,7 +100,7 @@ export default function SearchPage() {
             <section>
               <h2 className='text-2xl font-semibold mb-4'>Authors ({results.authors.length})</h2>
               <div className='space-y-4'>
-                {results.authors.map((author) => (
+                {results.authors.map((author: SearchAuthor) => (
                   <AuthorCard key={author._id} slug={author.slug ?? author._id} name={author.name} />
                 ))}
               </div>

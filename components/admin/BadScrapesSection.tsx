@@ -2,9 +2,15 @@
 
 import Link from 'next/link'
 import { useQuery } from 'convex/react'
+import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+
+type BadScrapesData = NonNullable<FunctionReturnType<typeof api.lib.badScrape.listBadScrapes>>
+type BadScrapeBook = BadScrapesData['books'][number]
+type BadScrapeSeries = BadScrapesData['series'][number]
+type BadScrapeAuthor = BadScrapesData['authors'][number]
 
 export function BadScrapesSection() {
   const badScrapes = useQuery(api.lib.badScrape.listBadScrapes)
@@ -37,7 +43,7 @@ export function BadScrapesSection() {
             <div>
               <h3 className='font-medium mb-2'>Books ({badScrapes.books.length})</h3>
               <div className='space-y-1'>
-                {badScrapes.books.map((book) => (
+                {badScrapes.books.map((book: BadScrapeBook) => (
                   <div key={book._id} className='flex items-center gap-2 text-sm'>
                     <Link href={`/books/${book.slug ?? book._id}`} className='text-blue-500 hover:underline'>
                       {book.title}
@@ -53,7 +59,7 @@ export function BadScrapesSection() {
             <div>
               <h3 className='font-medium mb-2'>Series ({badScrapes.series.length})</h3>
               <div className='space-y-1'>
-                {badScrapes.series.map((series) => (
+                {badScrapes.series.map((series: BadScrapeSeries) => (
                   <div key={series._id} className='flex items-center gap-2 text-sm'>
                     <Link href={`/series/${series.slug ?? series._id}`} className='text-blue-500 hover:underline'>
                       {series.name}
@@ -69,7 +75,7 @@ export function BadScrapesSection() {
             <div>
               <h3 className='font-medium mb-2'>Authors ({badScrapes.authors.length})</h3>
               <div className='space-y-1'>
-                {badScrapes.authors.map((author) => (
+                {badScrapes.authors.map((author: BadScrapeAuthor) => (
                   <div key={author._id} className='flex items-center gap-2 text-sm'>
                     <span>{author.name}</span>
                     {author.badScrapeNotes && <span className='text-muted-foreground'>- {author.badScrapeNotes}</span>}

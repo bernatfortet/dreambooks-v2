@@ -1,6 +1,7 @@
 import { query, internalQuery } from '../_generated/server'
 import { v } from 'convex/values'
 import { Id, Doc } from '../_generated/dataModel'
+import { resolveBookCoverUrls } from '../lib/bookCoverUrls'
 
 /**
  * Resolve multiple image URLs from author's image storage IDs.
@@ -124,8 +125,7 @@ export const listWithTopBooks = query({
             const book = (await context.db.get(link.bookId)) as Doc<'books'> | null
             if (!book) return null
 
-            const coverStorageId = book.cover?.storageIdMedium
-            const coverUrl = coverStorageId ? await context.storage.getUrl(coverStorageId) : null
+            const { coverUrl } = await resolveBookCoverUrls(context.storage, book)
 
             return {
               _id: book._id,
@@ -230,8 +230,7 @@ export const getWithDetails = query({
         const book = (await context.db.get(link.bookId)) as Doc<'books'> | null
         if (!book) return null
 
-        const coverStorageId = book.cover?.storageIdMedium
-        const coverUrl = coverStorageId ? await context.storage.getUrl(coverStorageId) : null
+        const { coverUrl } = await resolveBookCoverUrls(context.storage, book)
 
         return {
           _id: book._id,
@@ -307,8 +306,7 @@ export const getBySlug = query({
         const book = (await context.db.get(link.bookId)) as Doc<'books'> | null
         if (!book) return null
 
-        const coverStorageId = book.cover?.storageIdMedium
-        const coverUrl = coverStorageId ? await context.storage.getUrl(coverStorageId) : null
+        const { coverUrl } = await resolveBookCoverUrls(context.storage, book)
 
         return {
           _id: book._id,
@@ -379,8 +377,7 @@ export const getBySlugOrId = query({
         bookLinks.map(async (link) => {
           const book = (await context.db.get(link.bookId)) as Doc<'books'> | null
           if (!book) return null
-          const coverStorageId = book.cover?.storageIdMedium
-          const coverUrl = coverStorageId ? await context.storage.getUrl(coverStorageId) : null
+          const { coverUrl } = await resolveBookCoverUrls(context.storage, book)
           return {
             _id: book._id,
             slug: book.slug ?? null,
@@ -420,8 +417,7 @@ export const getBySlugOrId = query({
           bookLinks.map(async (link) => {
             const book = (await context.db.get(link.bookId)) as Doc<'books'> | null
             if (!book) return null
-            const coverStorageId = book.cover?.storageIdMedium
-            const coverUrl = coverStorageId ? await context.storage.getUrl(coverStorageId) : null
+            const { coverUrl } = await resolveBookCoverUrls(context.storage, book)
             return {
               _id: book._id,
               slug: book.slug ?? null,

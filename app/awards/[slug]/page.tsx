@@ -4,8 +4,8 @@ import { use } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { useQuery } from 'convex/react'
+import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
-import { isDev } from '@/lib/env'
 import { DataDebugPanel } from '@/components/ui/DataDebugPanel'
 import { BookCard, BookCardBadge } from '@/components/books/BookCard'
 import { PageContainer } from '@/components/ui/PageContainer'
@@ -13,6 +13,9 @@ import { PageContainer } from '@/components/ui/PageContainer'
 type AwardPageProps = {
   params: Promise<{ slug: string }>
 }
+
+type AwardPageData = NonNullable<FunctionReturnType<typeof api.awards.queries.getWithBooksBySlug>>
+type AwardBook = AwardPageData['books'][number]
 
 export default function AwardPage({ params }: AwardPageProps) {
   const { slug } = use(params)
@@ -65,7 +68,7 @@ export default function AwardPage({ params }: AwardPageProps) {
         <p className='text-muted-foreground'>No books have won this award yet.</p>
       ) : (
         <div className='grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4'>
-          {award.books.map((book) => (
+          {award.books.map((book: AwardBook) => (
             <BookCard
               key={book._id}
               slug={book.slug ?? book._id}
@@ -112,7 +115,7 @@ function AwardDetailSkeleton() {
       <div className='grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4'>
         {Array.from({ length: 6 }).map((_, index) => (
           <div key={index} className='space-y-2'>
-            <div className='aspect-[2/3] bg-muted rounded-lg animate-pulse' />
+            <div className='aspect-2/3 bg-muted rounded-lg animate-pulse' />
             <div className='h-4 bg-muted rounded animate-pulse w-3/4' />
             <div className='h-3 bg-muted rounded animate-pulse w-1/2' />
           </div>

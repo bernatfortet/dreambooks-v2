@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useQuery } from 'convex/react'
+import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
 import { useDebounce } from '@/lib/hooks/useDebounce'
 import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from '@/components/ui/command'
@@ -29,6 +30,11 @@ const TYPE_TO_ICON: Record<RecentSearch['type'], typeof Book> = {
   series: Library,
   author: Users,
 }
+
+type SearchResults = NonNullable<FunctionReturnType<typeof api.search.queries.global>>
+type SearchBook = SearchResults['books'][number]
+type SearchSeries = SearchResults['series'][number]
+type SearchAuthor = SearchResults['authors'][number]
 
 export function SearchBar() {
   const [query, setQuery] = useState('')
@@ -175,7 +181,7 @@ export function SearchBar() {
 
                   {results?.books && results.books.length > 0 && (
                     <CommandGroup heading='Books'>
-                      {results.books.map((book) => (
+                      {results.books.map((book: SearchBook) => (
                         <CommandItem
                           key={book._id}
                           value={book.title}
@@ -197,7 +203,7 @@ export function SearchBar() {
 
                   {results?.series && results.series.length > 0 && (
                     <CommandGroup heading='Series'>
-                      {results.series.map((s) => (
+                      {results.series.map((s: SearchSeries) => (
                         <CommandItem
                           key={s._id}
                           value={s.name}
@@ -219,7 +225,7 @@ export function SearchBar() {
 
                   {results?.authors && results.authors.length > 0 && (
                     <CommandGroup heading='Authors'>
-                      {results.authors.map((author) => (
+                      {results.authors.map((author: SearchAuthor) => (
                         <CommandItem
                           key={author._id}
                           value={author.name}
