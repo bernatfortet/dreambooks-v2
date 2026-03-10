@@ -4,14 +4,23 @@ const nextConfig: NextConfig = {
   images: {
     remotePatterns: [
       {
-        // Convex file storage URLs
+        // Convex API and legacy file storage URLs
         protocol: 'https',
-        hostname: '*.convex.cloud',
+        hostname: '**.convex.cloud',
       },
       {
-        // Convex file storage URLs (alternative pattern)
+        // Convex file-serving URLs returned by storage.getUrl()
+        protocol: 'https',
+        hostname: '**.convex.site',
+      },
+      {
+        // Convex root domains
         protocol: 'https',
         hostname: 'convex.cloud',
+      },
+      {
+        protocol: 'https',
+        hostname: 'convex.site',
       },
       {
         // Amazon image URLs

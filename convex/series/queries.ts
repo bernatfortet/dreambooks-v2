@@ -1,6 +1,7 @@
 import { query, internalQuery } from '../_generated/server'
 import { v } from 'convex/values'
 import { Id, Doc } from '../_generated/dataModel'
+import { resolveBookCoverUrls } from '../lib/bookCoverUrls'
 
 /**
  * List all series for display.
@@ -88,8 +89,7 @@ export const getWithBooks = query({
     const booksWithCovers = await Promise.all(
       books.map(async (book) => {
         // Check nested cover first, fall back to flat field
-        const bookCoverStorageId = book.cover?.storageIdMedium
-        const bookCoverUrl = bookCoverStorageId ? await context.storage.getUrl(bookCoverStorageId) : null
+        const { coverUrl: bookCoverUrl } = await resolveBookCoverUrls(context.storage, book)
 
         return {
           _id: book._id,
@@ -139,8 +139,7 @@ export const getWithBooksBySlug = query({
     const booksWithCovers = await Promise.all(
       books.map(async (book) => {
         // Check nested cover first, fall back to flat field
-        const bookCoverStorageId = book.cover?.storageIdMedium
-        const bookCoverUrl = bookCoverStorageId ? await context.storage.getUrl(bookCoverStorageId) : null
+        const { coverUrl: bookCoverUrl } = await resolveBookCoverUrls(context.storage, book)
 
         return {
           _id: book._id,
@@ -225,8 +224,7 @@ export const getWithBooksBySlugOrId = query({
     const booksWithCovers = await Promise.all(
       books.map(async (book) => {
         // Check nested cover first, fall back to flat field
-        const bookCoverStorageId = book.cover?.storageIdMedium
-        const bookCoverUrl = bookCoverStorageId ? await context.storage.getUrl(bookCoverStorageId) : null
+        const { coverUrl: bookCoverUrl } = await resolveBookCoverUrls(context.storage, book)
 
         return {
           _id: book._id,
@@ -272,8 +270,7 @@ export const getWithDiscoveries = query({
     const booksWithCovers = await Promise.all(
       books.map(async (book) => {
         // Check nested cover first, fall back to flat field
-        const bookCoverStorageId = book.cover?.storageIdMedium
-        const bookCoverUrl = bookCoverStorageId ? await context.storage.getUrl(bookCoverStorageId) : null
+        const { coverUrl: bookCoverUrl } = await resolveBookCoverUrls(context.storage, book)
 
         return {
           _id: book._id,
