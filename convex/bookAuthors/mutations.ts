@@ -1,5 +1,21 @@
-import { internalMutation, mutation } from '../_generated/server'
+import { internalMutation, mutation, type MutationCtx } from '../_generated/server'
 import { v } from 'convex/values'
+import type { Doc, Id } from '../_generated/dataModel'
+
+const contributorValidator = v.object({
+  name: v.string(),
+  amazonAuthorId: v.optional(v.string()),
+  role: v.string(),
+})
+
+const contributorRoleValidator = v.union(
+  v.literal('author'),
+  v.literal('illustrator'),
+  v.literal('editor'),
+  v.literal('translator'),
+  v.literal('narrator'),
+  v.literal('other'),
+)
 
 /**
  * Link books to an author by amazonAuthorId (primary) or name (fallback).
@@ -79,38 +95,83 @@ export const linkBookToAuthor = internalMutation({
     bookId: v.id('books'),
     authorId: v.id('authors'),
     source: v.string(), // 'amazonAuthorId' | 'nameMatch'
-    role: v.optional(
-      v.union(
-        v.literal('author'),
-        v.literal('illustrator'),
-        v.literal('editor'),
-        v.literal('translator'),
-        v.literal('narrator'),
-        v.literal('other'),
-      ),
-    ),
+    role: v.optional(contributorRoleValidator),
   },
   returns: v.boolean(),
   handler: async (context, args) => {
-    // Check if link already exists
-    const existing = await context.db
-      .query('bookAuthors')
-      .withIndex('by_bookId_authorId', (q) => q.eq('bookId', args.bookId).eq('authorId', args.authorId))
-      .unique()
+    return await insertBookAuthorLink(context, args)
+  },
+})
 
-    if (existing) {
-      return false
+/**
+ * Link a book to any authors that already exist in the authors table.
+ * This closes the gap where books imported after an author was created never got a join row.
+ */
+export const linkExistingAuthorsForBook = internalMutation({
+  args: {
+    bookId: v.id('books'),
+    authorNames: v.array(v.string()),
+    amazonAuthorIds: v.optional(v.array(v.string())),
+    contributors: v.optional(v.array(contributorValidator)),
+  },
+  returns: v.object({
+    linkedCount: v.number(),
+    matchedAuthorCount: v.number(),
+  }),
+  handler: async (context, args) => {
+    return await linkExistingAuthorsForBookRecord(context, args)
+  },
+})
+
+/**
+ * One-time repair utility for books that were imported before book-author join rows existed.
+ */
+export const backfillMissingLinksForBooks = internalMutation({
+  args: {
+    bookIds: v.optional(v.array(v.id('books'))),
+  },
+  returns: v.object({
+    booksScanned: v.number(),
+    booksWithNewLinks: v.number(),
+    linksCreated: v.number(),
+  }),
+  handler: async (context, args) => {
+    const books = args.bookIds?.length
+      ? (
+          await Promise.all(args.bookIds.map((bookId) => context.db.get(bookId)))
+        ).filter((book): book is Doc<'books'> => book !== null)
+      : await context.db.query('books').collect()
+
+    let booksWithNewLinks = 0
+    let linksCreated = 0
+
+    for (const book of books) {
+      if (book.authors.length === 0 && !book.amazonAuthorIds?.length) continue
+
+      const result = await linkExistingAuthorsForBookRecord(context, {
+        bookId: book._id,
+        authorNames: book.authors,
+        amazonAuthorIds: book.amazonAuthorIds,
+        contributors: book.contributors,
+      })
+
+      if (result.linkedCount > 0) {
+        booksWithNewLinks++
+        linksCreated += result.linkedCount
+      }
     }
 
-    await context.db.insert('bookAuthors', {
-      bookId: args.bookId,
-      authorId: args.authorId,
-      source: args.source,
-      role: args.role,
-      createdAt: Date.now(),
+    console.log('✅ Backfilled missing book-author links', {
+      booksScanned: books.length,
+      booksWithNewLinks,
+      linksCreated,
     })
 
-    return true
+    return {
+      booksScanned: books.length,
+      booksWithNewLinks,
+      linksCreated,
+    }
   },
 })
 
@@ -139,6 +200,157 @@ export const unlinkBookFromAuthor = mutation({
 })
 
 type ContributorRole = 'author' | 'illustrator' | 'editor' | 'translator' | 'narrator' | 'other'
+
+async function linkExistingAuthorsForBookRecord(
+  context: MutationCtx,
+  args: {
+    bookId: Id<'books'>
+    authorNames: string[]
+    amazonAuthorIds?: string[]
+    contributors?: Array<{ name: string; amazonAuthorId?: string; role: string }>
+  },
+) {
+  const matchedAuthors = await findExistingAuthorsForBook(context, {
+    authorNames: args.authorNames,
+    amazonAuthorIds: args.amazonAuthorIds,
+  })
+
+  let linkedCount = 0
+
+  for (const author of matchedAuthors) {
+    const source = args.amazonAuthorIds?.includes(author.amazonAuthorId) ? 'amazonAuthorId' : 'nameMatch'
+    const role = getContributorRoleForAuthor({
+      author,
+      authorNames: args.authorNames,
+      amazonAuthorIds: args.amazonAuthorIds,
+      contributors: args.contributors,
+    })
+
+    const inserted = await insertBookAuthorLink(context, {
+      bookId: args.bookId,
+      authorId: author._id,
+      source,
+      role,
+    })
+
+    if (inserted) {
+      linkedCount++
+    }
+  }
+
+  return {
+    linkedCount,
+    matchedAuthorCount: matchedAuthors.length,
+  }
+}
+
+async function findExistingAuthorsForBook(
+  context: MutationCtx,
+  args: {
+    authorNames: string[]
+    amazonAuthorIds?: string[]
+  },
+): Promise<Doc<'authors'>[]> {
+  const matchedAuthors = new Map<Id<'authors'>, Doc<'authors'>>()
+
+  for (const amazonAuthorId of new Set(args.amazonAuthorIds ?? [])) {
+    const author = await context.db
+      .query('authors')
+      .withIndex('by_amazonAuthorId', (q) => q.eq('amazonAuthorId', amazonAuthorId))
+      .unique()
+
+    if (author) {
+      matchedAuthors.set(author._id, author)
+    }
+  }
+
+  for (const authorName of new Set(args.authorNames)) {
+    const author = await context.db
+      .query('authors')
+      .withIndex('by_name', (q) => q.eq('name', authorName))
+      .first()
+
+    if (author) {
+      matchedAuthors.set(author._id, author)
+    }
+  }
+
+  const unmatchedNormalizedNames = new Set(
+    args.authorNames
+      .map(normalizePersonNameForMatch)
+      .filter(
+        (name) =>
+          name &&
+          !Array.from(matchedAuthors.values()).some((author) => normalizePersonNameForMatch(author.name) === name),
+      ),
+  )
+
+  if (unmatchedNormalizedNames.size > 0) {
+    const allAuthors = await context.db.query('authors').collect()
+
+    for (const author of allAuthors) {
+      const normalizedAuthorName = normalizePersonNameForMatch(author.name)
+      if (unmatchedNormalizedNames.has(normalizedAuthorName)) {
+        matchedAuthors.set(author._id, author)
+      }
+    }
+  }
+
+  return Array.from(matchedAuthors.values())
+}
+
+function getContributorRoleForAuthor(args: {
+  author: Doc<'authors'>
+  authorNames: string[]
+  amazonAuthorIds?: string[]
+  contributors?: Array<{ name: string; amazonAuthorId?: string; role: string }>
+}): ContributorRole | undefined {
+  if (!args.contributors?.length) return undefined
+
+  const normalizedAuthorName = normalizePersonNameForMatch(args.author.name)
+
+  const contributor = args.contributors.find((item) => {
+    const hasAmazonId = item.amazonAuthorId === args.author.amazonAuthorId
+    const hasExactName = item.name.toLowerCase() === args.author.name.toLowerCase()
+    const hasNormalizedName = normalizePersonNameForMatch(item.name) === normalizedAuthorName
+
+    if (args.amazonAuthorIds?.includes(args.author.amazonAuthorId) && hasAmazonId) return true
+    if (args.authorNames.includes(args.author.name) && hasExactName) return true
+    return hasNormalizedName
+  })
+
+  if (!contributor) return undefined
+  return toContributorRole(contributor.role)
+}
+
+async function insertBookAuthorLink(
+  context: MutationCtx,
+  args: {
+    bookId: Id<'books'>
+    authorId: Id<'authors'>
+    source: string
+    role?: ContributorRole
+  },
+) {
+  const existing = await context.db
+    .query('bookAuthors')
+    .withIndex('by_bookId_authorId', (q) => q.eq('bookId', args.bookId).eq('authorId', args.authorId))
+    .unique()
+
+  if (existing) {
+    return false
+  }
+
+  await context.db.insert('bookAuthors', {
+    bookId: args.bookId,
+    authorId: args.authorId,
+    source: args.source,
+    role: args.role,
+    createdAt: Date.now(),
+  })
+
+  return true
+}
 
 function toContributorRole(role: string): ContributorRole {
   if (role === 'author') return 'author'

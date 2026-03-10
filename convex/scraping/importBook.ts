@@ -29,9 +29,14 @@ const EDITION_FORMAT_PRIORITY: Record<string, number> = {
   unknown: -2,
 }
 
-const bookEditionsMutations = internal['bookEditions/mutations']
-const bookIdentifiersMutations = internal['bookIdentifiers/mutations']
-const bookCoverCandidatesMutations = internal['bookCoverCandidates/mutations']
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const bookEditionsMutations = (internal as any)['bookEditions/mutations']
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const bookIdentifiersMutations = (internal as any)['bookIdentifiers/mutations']
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const bookCoverCandidatesMutations = (internal as any)['bookCoverCandidates/mutations']
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const bookAuthorsMutations = (internal as any)['bookAuthors/mutations']
 
 type BookIdentifierType = 'asin' | 'isbn10' | 'isbn13'
 type ImportedEdition = { editionId: Id<'bookEditions'>; format: string }
@@ -218,6 +223,21 @@ export const importFromLocalScrape = action({
     const { bookId, isNew, coverSourceUrlChanged } = result
 
     console.log('✅ Book imported', { bookId, isNew, title: args.scrapedData.title })
+
+    const authorLinkResult = await context.runMutation(bookAuthorsMutations.linkExistingAuthorsForBook, {
+      bookId,
+      authorNames: args.scrapedData.authors,
+      amazonAuthorIds: args.scrapedData.amazonAuthorIds,
+      contributors: args.scrapedData.contributors,
+    })
+
+    if (authorLinkResult.linkedCount > 0) {
+      console.log('🔗 Linked book to existing authors', {
+        bookId,
+        linkedCount: authorLinkResult.linkedCount,
+        matchedAuthorCount: authorLinkResult.matchedAuthorCount,
+      })
+    }
 
     // Schedule cover download if we have a URL
     if (args.scrapedData.coverImageUrl && !args.skipCoverDownload) {
