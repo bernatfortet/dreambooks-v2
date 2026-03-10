@@ -180,16 +180,6 @@ export const importFromLocalScrape = action({
       // Download cover if: new book, or coverSourceUrl changed
       const needsCover = isNew || coverSourceUrlChanged
 
-      // #region agent log
-      console.log('[DEBUG] Cover download decision', {
-        bookId,
-        isNew,
-        coverSourceUrlChanged,
-        needsCover,
-        willDownload: needsCover,
-      })
-      // #endregion
-
       if (needsCover) {
         await context.scheduler.runAfter(0, internal.scraping.downloadCover.downloadCover, {
           bookId,
