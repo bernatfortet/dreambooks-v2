@@ -19,8 +19,9 @@ export function AuthButton() {
   const { signIn, signOut } = useAuthActions()
   const authToken = useAuthToken()
   const viewer = useQuery(api.users.queries.viewer)
-  const [isPending, setIsPending] = useState(false)
+  const [pendingAction, setPendingAction] = useState<'sign-in' | 'sign-out' | null>(null)
   const profile = useMemo(() => getDisplayProfile(viewer, decodeAuthToken(authToken)), [authToken, viewer])
+  const isPending = pendingAction !== null
 
   if (isLoading) {
     return (
@@ -44,16 +45,33 @@ export function AuthButton() {
 
   return (
     <Button variant='outline' size='sm' disabled={isPending} onClick={() => void handleSignIn()}>
-      {isPending ? 'Redirecting...' : 'Sign in with Google'}
+      {pendingAction === 'sign-in' ? 'Redirecting...' : 'Sign in with Google'}
     </Button>
   )
 
   async function handleSignIn() {
-    await runAuthAction(setIsPending, () => signIn('google'))
+    setPendingAction('sign-in')
+
+    try {
+      const result = await signIn('google')
+
+      // Convex Auth triggers the browser redirect and then resolves.
+      // Keep the button disabled so it doesn't flash back before navigation.
+      if (result.redirect || result.signingIn) return
+
+      setPendingAction(null)
+    } catch (error) {
+      setPendingAction(null)
+      throw error
+    }
   }
 
   async function handleSignOut() {
-    await runAuthAction(setIsPending, signOut)
+    await runAuthAction({
+      action: signOut,
+      pendingAction: 'sign-out',
+      setPendingAction,
+    })
   }
 }
 
@@ -136,13 +154,21 @@ function decodeAuthToken(token: string | null | undefined): AuthTokenProfile | n
   }
 }
 
-async function runAuthAction(setIsPending: (value: boolean) => void, action: () => Promise<unknown>) {
-  setIsPending(true)
+async function runAuthAction({
+  action,
+  pendingAction,
+  setPendingAction,
+}: {
+  action: () => Promise<unknown>
+  pendingAction: 'sign-in' | 'sign-out'
+  setPendingAction: (value: 'sign-in' | 'sign-out' | null) => void
+}) {
+  setPendingAction(pendingAction)
 
   try {
     await action()
   } finally {
-    setIsPending(false)
+    setPendingAction(null)
   }
 }
 

@@ -2,7 +2,15 @@ import Google from '@auth/core/providers/google'
 import { convexAuth } from '@convex-dev/auth/server'
 
 export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
-  providers: [Google],
+  providers: [
+    Google({
+      authorization: {
+        params: {
+          prompt: 'select_account',
+        },
+      },
+    }),
+  ],
   callbacks: {
     createOrUpdateUser: async (context, args) => {
       const name = typeof args.profile.name === 'string' ? args.profile.name : undefined
