@@ -1,13 +1,11 @@
 'use client'
 
-import { useState } from 'react'
 import { useQuery } from 'convex/react'
 import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
 import Image from 'next/image'
 import Link from 'next/link'
 
-const AUTHOR_BOOK_COVER_HEIGHT = 120
 const DEFAULT_BOOK_COVER_ASPECT_RATIO = 2 / 3
 
 type AuthorListData = NonNullable<FunctionReturnType<typeof api.authors.queries.listWithTopBooks>>
@@ -50,61 +48,48 @@ type AuthorItemProps = {
 
 function AuthorItem({ slug, name, imageUrl, books }: AuthorItemProps) {
   return (
-    <div className='flex gap-4'>
-      <div className='shrink-0'>
-        {imageUrl ? (
-          <div className='relative w-16 h-16'>
-            <Image src={imageUrl} alt={name} fill className='rounded-full object-cover' sizes='64px' />
-          </div>
-        ) : (
-          <div className='w-16 h-16 rounded-full bg-muted flex items-center justify-center text-muted-foreground font-medium'>
-            {name.charAt(0).toUpperCase()}
-          </div>
-        )}
-      </div>
+    <div className='space-y-4'>
+      <div className='flex items-center gap-4'>
+        <AuthorAvatar imageUrl={imageUrl} name={name} />
 
-      <div className='flex-1'>
-        <Link href={`/authors/${slug}`}>
-          <h2 className='text-xl font-semibold mb-3 hover:text-primary transition-colors'>{name}</h2>
+        <Link href={getAuthorPath(slug)}>
+          <h2 className='text-xl font-semibold transition-colors hover:text-primary'>{name}</h2>
         </Link>
-
-        {books.length === 0 ? (
-          <p className='text-sm text-muted-foreground'>No books yet.</p>
-        ) : (
-          <div className='flex gap-3 overflow-x-auto pb-2'>
-            {books.map((book) => <AuthorBookLink key={book._id} book={book} />)}
-          </div>
-        )}
       </div>
+
+      {books.length === 0 ? (
+        <p className='text-sm text-muted-foreground'>No books yet.</p>
+      ) : (
+        <div className='grid grid-cols-2 gap-3 sm:flex sm:gap-3 sm:overflow-x-auto sm:pb-2'>
+          {books.map((book) => <AuthorBookLink key={book._id} book={book} />)}
+        </div>
+      )}
     </div>
   )
 }
 
 function AuthorBookLink({ book }: { book: AuthorBook }) {
-  const [loadedAspectRatio, setLoadedAspectRatio] = useState<number | null>(null)
-  const displayWidth = getBookCoverDisplayWidth(book, loadedAspectRatio)
-  const coverStyle = getBookCoverStyle(displayWidth)
-  const titleStyle = getBookTitleStyle(displayWidth)
+  const coverAspectRatio = getBookCoverAspectRatio(book.coverWidth, book.coverHeight)
 
   return (
-    <Link href={`/books/${book.slug ?? book._id}`} className='shrink-0 group' style={titleStyle}>
-      <div className='relative bg-muted rounded-lg overflow-hidden mb-1' style={coverStyle}>
+    <Link href={getBookPath(book.slug, book._id)} className='group min-w-0 sm:w-28 sm:shrink-0'>
+      <div className='relative mb-2 overflow-hidden rounded-lg bg-muted' style={{ aspectRatio: coverAspectRatio }}>
         {book.coverUrl ? (
           <Image
             src={book.coverUrl}
             alt={book.title}
             fill
             className='object-cover group-hover:scale-105 transition-transform duration-200'
-            sizes={`${displayWidth}px`}
-            onLoad={handleBookCoverLoad(setLoadedAspectRatio)}
+            sizes='(max-width: 640px) 44vw, 112px'
           />
         ) : (
-          <div className='w-full h-full flex items-center justify-center text-muted-foreground text-xs p-2 text-center'>
+          <div className='flex h-full w-full items-center justify-center p-2 text-center text-xs text-muted-foreground'>
             {book.title}
           </div>
         )}
       </div>
-      <p className='text-xs text-muted-foreground line-clamp-2 group-hover:text-primary transition-colors' style={titleStyle}>{book.title}</p>
+
+      <p className='line-clamp-3 text-xs text-muted-foreground transition-colors group-hover:text-primary'>{book.title}</p>
     </Link>
   )
 }
@@ -113,15 +98,16 @@ function AuthorListSkeleton() {
   return (
     <div className='space-y-8'>
       {Array.from({ length: 5 }).map((_, index) => (
-        <div key={index} className='flex gap-4'>
-          <div className='w-16 h-16 rounded-full bg-muted animate-pulse shrink-0' />
-          <div className='flex-1 space-y-3'>
-            <div className='h-6 bg-muted rounded animate-pulse w-48' />
-            <div className='flex gap-3'>
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className='w-20 bg-muted rounded-lg animate-pulse shrink-0' style={{ height: `${AUTHOR_BOOK_COVER_HEIGHT}px` }} />
-              ))}
-            </div>
+        <div key={index} className='space-y-4'>
+          <div className='flex items-center gap-4'>
+            <div className='h-16 w-16 shrink-0 animate-pulse rounded-full bg-muted' />
+            <div className='h-6 w-48 animate-pulse rounded bg-muted' />
+          </div>
+
+          <div className='grid grid-cols-2 gap-3 sm:flex sm:gap-3'>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className='aspect-2/3 animate-pulse rounded-lg bg-muted sm:w-28 sm:shrink-0' />
+            ))}
           </div>
         </div>
       ))}
@@ -129,31 +115,28 @@ function AuthorListSkeleton() {
   )
 }
 
-function getBookCoverDisplayWidth(book: AuthorBook, loadedAspectRatio?: number | null) {
-  const coverAspectRatio = loadedAspectRatio ?? getBookCoverAspectRatio(book.coverWidth, book.coverHeight)
-  const displayWidth = Math.round(AUTHOR_BOOK_COVER_HEIGHT * coverAspectRatio)
-
-  return displayWidth
-}
-
-function handleBookCoverLoad(setLoadedAspectRatio: (aspectRatio: number) => void) {
-  return (event: React.SyntheticEvent<HTMLImageElement>) => {
-    const image = event.currentTarget
-    const intrinsicAspectRatio = getBookCoverAspectRatio(image.naturalWidth, image.naturalHeight)
-
-    setLoadedAspectRatio(intrinsicAspectRatio)
+function AuthorAvatar({ imageUrl, name }: { imageUrl: string | null; name: string }) {
+  if (imageUrl) {
+    return (
+      <div className='relative h-16 w-16 shrink-0'>
+        <Image src={imageUrl} alt={name} fill className='rounded-full object-cover' sizes='64px' />
+      </div>
+    )
   }
+
+  return (
+    <div className='flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-muted font-medium text-muted-foreground'>
+      {getInitial(name)}
+    </div>
+  )
 }
 
-function getBookCoverStyle(displayWidth: number) {
-  return {
-    width: `${displayWidth}px`,
-    height: `${AUTHOR_BOOK_COVER_HEIGHT}px`,
-  }
+function getAuthorPath(slug: string) {
+  return `/authors/${slug}`
 }
 
-function getBookTitleStyle(displayWidth: number) {
-  return { width: `${displayWidth}px` }
+function getBookPath(slug: string | null | undefined, id: string) {
+  return `/books/${slug ?? id}`
 }
 
 function getBookCoverAspectRatio(coverWidth: number | null, coverHeight: number | null) {
@@ -161,4 +144,8 @@ function getBookCoverAspectRatio(coverWidth: number | null, coverHeight: number 
   if (coverWidth <= 0 || coverHeight <= 0) return DEFAULT_BOOK_COVER_ASPECT_RATIO
 
   return coverWidth / coverHeight
+}
+
+function getInitial(name: string) {
+  return name.charAt(0).toUpperCase()
 }

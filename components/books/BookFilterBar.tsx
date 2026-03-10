@@ -25,14 +25,7 @@ type BookFilterBarProps = {
 export function BookFilterBar({ filters, onFiltersChange }: BookFilterBarProps) {
   const { awards, filterOptions, isLoading } = useBookFiltersData()
 
-  const toggleArrayFilter = <K extends 'ageRangeBuckets' | 'gradeLevelBuckets' | 'awardIds'>(key: K, value: string) => {
-    const current: string[] = (filters[key] as string[] | undefined) || []
-    const updated = current.includes(value) ? current.filter((item) => item !== value) : [...current, value]
-    onFiltersChange({ ...filters, [key]: updated.length > 0 ? updated : undefined })
-  }
-
-  const hasActiveFilters = Object.keys(filters).some((key) => filters[key as keyof BookFilters] !== undefined)
-
+  const hasActiveFilters = hasSelectedFilters(filters)
   const isAgeRangeActive = (filters.ageRangeBuckets?.length ?? 0) > 0
   const isGradeLevelActive = (filters.gradeLevelBuckets?.length ?? 0) > 0
   const isAwardsActive = (filters.awardIds?.length ?? 0) > 0
@@ -41,7 +34,7 @@ export function BookFilterBar({ filters, onFiltersChange }: BookFilterBarProps) 
   return (
     <div className='sticky top-[52px] z-40 bg-white border-b'>
       <div className='container mx-auto px-4'>
-        <div className='flex items-center gap-2 py-1.5 overflow-x-auto whitespace-nowrap'>
+        <div className='flex flex-wrap items-center gap-2 py-2 md:flex-nowrap md:overflow-x-auto md:py-1.5 md:whitespace-nowrap'>
           <FilterButton label='Age Range' isActive={isAgeRangeActive} contentWidth='w-64'>
             {isLoading ? (
               <p className='text-sm text-muted-foreground'>Loading...</p>
@@ -56,7 +49,7 @@ export function BookFilterBar({ filters, onFiltersChange }: BookFilterBarProps) 
                   count={bucket.count}
                   checked={filters.ageRangeBuckets?.includes(bucket.id) || false}
                   disabled={bucket.count === 0}
-                  onChange={() => toggleArrayFilter('ageRangeBuckets', bucket.id)}
+                  onChange={() => onFiltersChange(toggleArrayFilter(filters, 'ageRangeBuckets', bucket.id))}
                 />
               ))
             )}
@@ -76,7 +69,7 @@ export function BookFilterBar({ filters, onFiltersChange }: BookFilterBarProps) 
                   count={bucket.count}
                   checked={filters.gradeLevelBuckets?.includes(bucket.id) || false}
                   disabled={bucket.count === 0}
-                  onChange={() => toggleArrayFilter('gradeLevelBuckets', bucket.id)}
+                  onChange={() => onFiltersChange(toggleArrayFilter(filters, 'gradeLevelBuckets', bucket.id))}
                 />
               ))
             )}
@@ -95,7 +88,7 @@ export function BookFilterBar({ filters, onFiltersChange }: BookFilterBarProps) 
                   label={award.name}
                   imageUrl={award.imageUrl}
                   checked={filters.awardIds?.includes(award._id) || false}
-                  onChange={() => toggleArrayFilter('awardIds', award._id)}
+                  onChange={() => onFiltersChange(toggleArrayFilter(filters, 'awardIds', award._id))}
                 />
               ))
             )}
@@ -190,4 +183,19 @@ function CheckboxItem({ id, label, checked, onChange, count, disabled, imageUrl 
       </Label>
     </div>
   )
+}
+
+function toggleArrayFilter<K extends 'ageRangeBuckets' | 'gradeLevelBuckets' | 'awardIds'>(
+  filters: BookFilters,
+  key: K,
+  value: string
+) {
+  const current = filters[key] ?? []
+  const updated = current.includes(value) ? current.filter((item) => item !== value) : [...current, value]
+
+  return { ...filters, [key]: updated.length > 0 ? updated : undefined }
+}
+
+function hasSelectedFilters(filters: BookFilters) {
+  return Object.values(filters).some((value) => value !== undefined)
 }
