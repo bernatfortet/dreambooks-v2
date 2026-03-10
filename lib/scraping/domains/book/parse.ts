@@ -286,6 +286,7 @@ async function extractTitle(page: Page): Promise<string | null> {
     const cleaned = text
       .trim()
       .replace(/\s*\([^)]+\)\s*$/, '') // Remove trailing parentheses (series names)
+      .replace(/:\s*$/, '')
       .trim()
 
     return cleaned || null
@@ -687,19 +688,13 @@ export async function extractSeriesInfo(page: Page): Promise<{
       const bulletHref = await bulletWidgetLink.getAttribute('href', { timeout: attributeTimeoutMs }).catch(() => null)
 
       if (bulletText && bulletHref) {
-        seriesUrl = bulletHref
-
-        // Parse "Book X of Y: Series Name" format
-        const bulletMatch = bulletText.match(/Book\s+(\d+)\s+of\s+\d+[:\s]*(.+)/i)
-        if (bulletMatch) {
-          seriesPosition = parseInt(bulletMatch[1], 10)
-          seriesName = bulletMatch[2].trim()
-        } else {
-          // Fallback: just use the text as series name
-          seriesName = bulletText.trim()
+        const extractedSeries = extractValidSeriesLinkData(bulletText)
+        if (extractedSeries) {
+          seriesUrl = bulletHref
+          seriesName = extractedSeries.seriesName
+          seriesPosition = extractedSeries.seriesPosition
+          console.log('📚 Found series from bulletWidget:', { seriesName, seriesUrl, seriesPosition })
         }
-
-        console.log('📚 Found series from bulletWidget:', { seriesName, seriesUrl, seriesPosition })
       }
     }
 
@@ -722,16 +717,12 @@ export async function extractSeriesInfo(page: Page): Promise<{
           const linkHref = await seriesLink.getAttribute('href', { timeout: attributeTimeoutMs }).catch(() => null)
 
           if (linkText && linkHref) {
-            seriesUrl = linkHref
+            const extractedSeries = extractValidSeriesLinkData(linkText)
+            if (!extractedSeries) continue
 
-            // Try to parse "Book X of Y: Series Name" format
-            const linkMatch = linkText.match(/Book\s+(\d+)\s+of\s+\d+[:\s]*(.+)/i)
-            if (linkMatch) {
-              seriesPosition = parseInt(linkMatch[1], 10)
-              seriesName = linkMatch[2].trim()
-            } else {
-              seriesName = linkText.trim()
-            }
+            seriesUrl = linkHref
+            seriesName = extractedSeries.seriesName
+            seriesPosition = extractedSeries.seriesPosition
 
             console.log(`📚 Found series from selector ${selector}:`, { seriesName, seriesUrl, seriesPosition })
             break
@@ -799,7 +790,7 @@ export async function extractSeriesInfo(page: Page): Promise<{
     }
 
     return {
-      seriesName: seriesName?.trim() ?? null,
+      seriesName: normalizeSeriesLinkName(seriesName ?? '') ?? null,
       seriesUrl,
       seriesPosition,
     }
@@ -807,6 +798,55 @@ export async function extractSeriesInfo(page: Page): Promise<{
     console.log('⚠️ Error extracting series info:', error instanceof Error ? error.message : 'Unknown')
     return { seriesName: null, seriesUrl: null, seriesPosition: null }
   }
+}
+
+const INVALID_SERIES_NAME_PATTERNS = [
+  /\bkindle edition\b/i,
+  /\bpaperback\b/i,
+  /\bhardcover\b/i,
+  /\baudiobook\b/i,
+  /\baudible\b/i,
+  /\bfollow the author\b/i,
+  /\bcontinue shopping\b/i,
+]
+
+function extractValidSeriesLinkData(linkText: string): { seriesName: string; seriesPosition: number | null } | null {
+  const trimmedText = linkText.trim()
+  if (!trimmedText) return null
+
+  const bookMatch = trimmedText.match(/Book\s+(\d+)\s+of\s+\d+[:\s]*(.+)/i)
+  if (bookMatch) {
+    const seriesName = normalizeSeriesLinkName(bookMatch[2])
+    if (!seriesName) return null
+
+    return {
+      seriesName,
+      seriesPosition: parseInt(bookMatch[1], 10),
+    }
+  }
+
+  const seriesName = normalizeSeriesLinkName(trimmedText)
+  if (!seriesName) return null
+
+  return {
+    seriesName,
+    seriesPosition: null,
+  }
+}
+
+function normalizeSeriesLinkName(rawName: string): string | null {
+  const cleanedName = rawName
+    .replace(/^Part of:\s*/i, '')
+    .replace(/\(\d+\s*books?\s*(?:series)?\)/i, '')
+    .replace(/Kindle Edition/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (cleanedName.length < 3) return null
+  if (/^\d+$/.test(cleanedName)) return null
+  if (INVALID_SERIES_NAME_PATTERNS.some((pattern) => pattern.test(cleanedName))) return null
+
+  return cleanedName
 }
 
 /**

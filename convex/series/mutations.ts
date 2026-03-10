@@ -93,6 +93,8 @@ export const upsert = internalMutation({
     firstSeenReason: v.optional(v.string()),
   },
   handler: async (context, args) => {
+    const normalizedName = requireValidSeriesName(args.name)
+
     // Extract sourceId from URL if amazon
     let sourceId: string | undefined
     if (args.source === 'amazon' && args.sourceUrl) {
@@ -102,7 +104,7 @@ export const upsert = internalMutation({
     const existingSeries = await findExistingSeriesByIdentifiers(context.db, {
       sourceId,
       sourceUrl: args.sourceUrl,
-      name: args.name,
+      name: normalizedName,
     })
 
     if (existingSeries) {
@@ -125,22 +127,17 @@ export const upsert = internalMutation({
     }
 
     // Create new series
-    console.log('💾 Creating new series', { name: args.name, sourceId })
+    console.log('💾 Creating new series', { name: normalizedName, sourceId })
 
-    const seriesId = await context.db.insert('series', {
-      name: args.name,
+    const seriesId = await createSeriesRecord(context, {
+      name: normalizedName,
       source: args.source,
       sourceUrl: args.sourceUrl,
       sourceId,
       description: args.description,
       firstSeenFromUrl: args.firstSeenFromUrl,
       firstSeenReason: args.firstSeenReason,
-      completeness: 'unknown',
-      scrapeStatus: 'pending',
-      createdAt: Date.now(),
     })
-    const slug = await generateUniqueSlug(context, 'series', args.name, seriesId)
-    await context.db.patch(seriesId, { slug })
     return seriesId
   },
 })
@@ -205,6 +202,21 @@ function isValidSeriesName(name: string): boolean {
   return true
 }
 
+function normalizeSeriesName(name: string): string | null {
+  const normalized = name
+    .replace(/^Part of:\s*/i, '')
+    .replace(/\(\d+\s*books?\s*(?:series)?\)/i, '')
+    .replace(/Kindle Edition/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (!isValidSeriesName(normalized)) {
+    return null
+  }
+
+  return normalized
+}
+
 /**
  * Update series from scrape results.
  */
@@ -226,10 +238,13 @@ export const updateFromScrape = internalMutation({
 
     // Only update name if it passes validation (prevent bad data from poisoning the series)
     let validatedName: string | undefined
-    if (name && isValidSeriesName(name)) {
-      validatedName = name
-    } else if (name) {
-      console.log('⚠️ Rejected invalid series name:', name)
+    if (name) {
+      const normalizedName = normalizeSeriesName(name)
+      if (normalizedName) {
+        validatedName = normalizedName
+      } else {
+        console.log('⚠️ Rejected invalid series name:', name)
+      }
     }
 
     // Calculate completeness
@@ -438,6 +453,8 @@ export const createFromBook = mutation({
       throw new Error('Book has no series name')
     }
 
+    const normalizedSeriesName = requireValidSeriesName(book.seriesName, 'Invalid series name on book')
+
     if (book.seriesId) {
       throw new Error('Book already linked to a series')
     }
@@ -454,7 +471,7 @@ export const createFromBook = mutation({
     const existingSeries = await findExistingSeriesByIdentifiers(context.db, {
       sourceId,
       sourceUrl,
-      name: book.seriesName,
+      name: normalizedSeriesName,
     })
 
     let seriesId: Id<'series'>
@@ -470,19 +487,14 @@ export const createFromBook = mutation({
         })
       }
     } else {
-      console.log('💾 Creating new series from book', { name: book.seriesName })
+      console.log('💾 Creating new series from book', { name: normalizedSeriesName })
 
-      seriesId = await context.db.insert('series', {
-        name: book.seriesName,
+      seriesId = await createSeriesRecord(context, {
+        name: normalizedSeriesName,
         source: 'amazon',
         sourceUrl,
         sourceId,
-        completeness: 'unknown',
-        scrapeStatus: 'pending',
-        createdAt: Date.now(),
       })
-      const slug = await generateUniqueSlug(context, 'series', book.seriesName, seriesId)
-      await context.db.patch(seriesId, { slug })
     }
 
     // Link the book to the series
@@ -519,13 +531,15 @@ export const upsertFromUrl = mutation({
   },
   returns: v.id('series'),
   handler: async (context, args) => {
+    const normalizedName = requireValidSeriesName(args.name)
+
     const sourceId = extractSeriesId(args.sourceUrl) ?? undefined
     const normalizedUrl = normalizeAmazonUrl(args.sourceUrl)
 
     const existingSeries = await findExistingSeriesByIdentifiers(context.db, {
       sourceId,
       sourceUrl: normalizedUrl,
-      name: args.name,
+      name: normalizedName,
     })
 
     let seriesId: Id<'series'>
@@ -556,10 +570,10 @@ export const upsertFromUrl = mutation({
       seriesId = existingSeries._id
     } else {
       // Create new series
-      console.log('💾 Creating new series from URL', { name: args.name, sourceId })
+      console.log('💾 Creating new series from URL', { name: normalizedName, sourceId })
 
-      seriesId = await context.db.insert('series', {
-        name: args.name,
+      seriesId = await createSeriesRecord(context, {
+        name: normalizedName,
         source: 'amazon',
         sourceUrl: normalizedUrl,
         sourceId,
@@ -567,12 +581,7 @@ export const upsertFromUrl = mutation({
         coverSourceUrl: args.coverImageUrl,
         firstSeenFromUrl: args.firstSeenFromUrl,
         firstSeenReason: args.firstSeenReason,
-        completeness: 'unknown',
-        scrapeStatus: 'pending',
-        createdAt: Date.now(),
       })
-      const slug = await generateUniqueSlug(context, 'series', args.name, seriesId)
-      await context.db.patch(seriesId, { slug })
     }
 
     // Schedule cover download if needed
@@ -884,7 +893,7 @@ async function updateSeriesAfterScrape(
 ) {
   const { seriesId, seriesName, description, coverImageUrl, expectedBookCount, scrapeVersion, booksFound, pagination } = params
 
-  const validatedName = isValidSeriesName(seriesName) ? seriesName : undefined
+  const validatedName = normalizeSeriesName(seriesName) ?? undefined
 
   let completeness: 'unknown' | 'partial' | 'confident' = 'unknown'
   if (expectedBookCount !== undefined) {
@@ -919,6 +928,48 @@ async function updateSeriesAfterScrape(
   await db.patch(seriesId, {
     scrapedBookCount: booksInSeries.length,
   })
+}
+
+function requireValidSeriesName(name: string, errorPrefix: string = 'Invalid series name'): string {
+  const normalizedName = normalizeSeriesName(name)
+  if (!normalizedName) {
+    throw new Error(`${errorPrefix}: ${name}`)
+  }
+
+  return normalizedName
+}
+
+async function createSeriesRecord(
+  context: MutationCtx,
+  params: {
+    name: string
+    source: string
+    sourceUrl?: string
+    sourceId?: string
+    description?: string
+    coverSourceUrl?: string
+    firstSeenFromUrl?: string
+    firstSeenReason?: string
+  },
+): Promise<Id<'series'>> {
+  const seriesId = await context.db.insert('series', {
+    name: params.name,
+    source: params.source,
+    sourceUrl: params.sourceUrl,
+    sourceId: params.sourceId,
+    description: params.description,
+    coverSourceUrl: params.coverSourceUrl,
+    firstSeenFromUrl: params.firstSeenFromUrl,
+    firstSeenReason: params.firstSeenReason,
+    completeness: 'unknown',
+    scrapeStatus: 'pending',
+    createdAt: Date.now(),
+  })
+
+  const slug = await generateUniqueSlug(context, 'series', params.name, seriesId)
+  await context.db.patch(seriesId, { slug })
+
+  return seriesId
 }
 
 async function createBasicBookFromSeriesEntry(
