@@ -1,0 +1,116 @@
+# Scraping Architecture Reference
+
+This document describes the scraping pipeline architecture for quick debugging reference.
+
+## Pipeline Overview
+
+```
+URL → Scrape (Playwright) → Parse (selectors) → Save (Convex) → Side Effects (cover download)
+```
+
+## Data Flow for Covers
+
+### Series Covers
+
+1. **Scrape**: `lib/scraping/domains/series/scrape.ts` calls `parseSeriesFromPage()`
+2. **Parse**: `lib/scraping/domains/series/parse.ts:extractCoverImage()` extracts `coverImageUrl`
+   - Selectors tried: `.series-image img`, `#seriesImageBlock img`, `#imgTagWrapperId img`, `.a-dynamic-image`
+3. **Save**: `convex/series/mutations.ts:saveFromCliScrape` saves to `coverSourceUrl`
+4. **Download**: `convex/scraping/downloadSeriesCover.ts` is scheduled, downloads image, saves `coverStorageId`
+
+### Book Covers
+
+1. **Scrape**: `lib/scraping/domains/book/scrape.ts` calls `parseBookFromPage()`
+2. **Parse**: `lib/scraping/domains/book/parse.ts:extractCoverImage()` extracts `coverImageUrl`
+   - Selectors tried: `#imgTagWrapperId img`, `#landingImage`, `#imgBlkFront`, `.a-dynamic-image`
+3. **Save**: `convex/books/mutations.ts:upsertFromScrape` saves to `coverSourceUrl`
+4. **Download**: `convex/scraping/downloadCover.ts` is scheduled, downloads image, saves `coverStorageId`
+
+## Key Files by Domain
+
+### Series
+| File | Purpose |
+|------|---------|
+| `lib/scraping/domains/series/scrape.ts` | Entry point - launches browser, calls parser |
+| `lib/scraping/domains/series/parse.ts` | Extracts data from page (name, cover, books) |
+| `convex/series/mutations.ts` | DB operations (save, update) |
+| `convex/scraping/downloadSeriesCover.ts` | Downloads cover image to storage |
+| `scripts/scrape-series.ts` | CLI for manual series scraping |
+
+### Books
+| File | Purpose |
+|------|---------|
+| `lib/scraping/domains/book/scrape.ts` | Entry point - launches browser, calls parser |
+| `lib/scraping/domains/book/parse.ts` | Extracts data from page (title, authors, cover) |
+| `convex/books/mutations.ts` | DB operations (save, update) |
+| `convex/scraping/downloadCover.ts` | Downloads cover image to storage |
+| `scripts/scrape-book.ts` | CLI for manual book scraping |
+
+## Database Fields (Cover-Related)
+
+### Series Table
+- `coverSourceUrl`: URL extracted from Amazon page
+- `coverStorageId`: Convex storage ID after download
+- To get public URL: `context.storage.getUrl(coverStorageId)`
+
+### Books Table
+- `coverSourceUrl`: URL extracted from Amazon page
+- `coverStorageId`: Convex storage ID after download
+- `coverStatus`: 'pending' | 'complete' | 'error'
+
+## Common Failure Points
+
+### Cover URL Not Extracted (coverSourceUrl is null)
+- **Cause**: Selectors don't match Amazon's current page structure
+- **Debug**: Run `bun scripts/debug.ts parse series <html-file>` to test selectors offline
+- **Fix**: Update selectors in `parse.ts:extractCoverImage()`
+
+### Cover URL Extracted But Not Saved (coverSourceUrl null, artifact has coverImageUrl)
+- **Cause**: Bug in mutation (not passing/saving the field)
+- **Debug**: Check `saveFromCliScrape` or `updateFromScrape` mutation
+- **Fix**: Ensure `coverSourceUrl` is included in the patch
+
+### Cover Downloaded But No Storage ID (coverSourceUrl set, coverStorageId null)
+- **Cause**: Download job failed or wasn't scheduled
+- **Debug**: Check Convex logs for `downloadSeriesCover` errors
+- **Fix**: Check if scheduler.runAfter was called, check URL validity
+
+### Storage ID Set But No Public URL (coverStorageId set, coverUrl null)
+- **Cause**: Storage.getUrl() failing or not called
+- **Debug**: Verify storageId exists in _storage table
+- **Fix**: Check query is calling storage.getUrl()
+
+## Debug Commands
+
+```bash
+# Inspect entity state + artifacts
+bun scripts/debug.ts inspect series <seriesId>
+bun scripts/debug.ts inspect book <bookId>
+bun scripts/debug.ts inspect book --asin <ASIN>
+
+# Parse HTML offline (test selectors)
+bun scripts/debug.ts parse series .cursor/debug-html/series_*.html
+bun scripts/debug.ts parse book .cursor/debug-html/book_*.html
+
+# Dry-run scrape (no DB writes)
+bun scripts/debug.ts scrape series <url>
+bun scripts/debug.ts scrape book <url>
+```
+
+## HTML Dumps
+
+Scrapes automatically dump HTML to `.cursor/debug-html/` when `SCRAPING_CONFIG.debug.dumpHtml` is true.
+
+Files are named: `{timestamp}_{type}_{asin}.html`
+
+Use these for offline selector testing without re-hitting Amazon.
+
+## Artifacts Table
+
+`scrapeArtifacts` stores the raw output of each scrape for debugging/versioning:
+- `entityType`: 'book' | 'series' | 'author'
+- `entityId`: Link to the entity
+- `payloadJson`: Full scrape output as JSON string
+- `scrapeVersion`: Version of parsing logic used
+
+Query artifacts to see what was actually extracted vs what was saved.

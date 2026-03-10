@@ -1,0 +1,59 @@
+# Data Updates: Migrations vs Re-scraping
+
+Two approaches to update data. Choose based on the source of truth.
+
+## Migrations (DB-only)
+
+Use when transforming existing data without needing fresh external data.
+
+**Examples**: field renames, data format changes, backfilling computed fields.
+
+**Location**: `convex/migrations/`
+
+## Re-scraping (via Queue)
+
+Use when you need fresh data from Amazon. **Never create new scraping scripts** — use the existing queue system.
+
+### Queue a re-scrape
+
+```typescript
+// Full re-scrape (discovers authors, series, etc.)
+await client.mutation(api.scrapeQueue.mutations.enqueue, {
+  url: 'https://amazon.com/dp/...',
+  type: 'book', // or 'series' | 'author'
+})
+
+// Focused re-scrape (skip side-effects)
+await client.mutation(api.scrapeQueue.mutations.queueRescrape, {
+  entityType: 'book',
+  entityId: bookId,
+  skipAuthorDiscovery: true, // Don't queue author pages
+  skipSeriesLink: true, // Don't link/create series
+  skipCoverDownload: true, // Don't re-download cover
+})
+```
+
+### Key files
+
+| File                              | Purpose                                         |
+| --------------------------------- | ----------------------------------------------- |
+| `convex/scrapeQueue/mutations.ts` | `enqueue`, `queueRescrape` — add items to queue |
+| `scripts/worker/index.ts`         | Worker that processes queued items              |
+| `scripts/worker/processors/`      | Processing logic per entity type                |
+
+### Skip flags for `queueRescrape`
+
+- `skipSeriesLink` — Don't link book to series
+- `skipAuthorDiscovery` — Don't queue author pages
+- `skipBookDiscoveries` — Don't queue books from series/author
+- `skipCoverDownload` — Don't download cover image
+
+## Decision guide
+
+| Need                                 | Approach  |
+| ------------------------------------ | --------- |
+| Transform existing field values      | Migration |
+| Fix scraper bug, need fresh data     | Re-scrape |
+| Add new field from external source   | Re-scrape |
+| Rename field, change format          | Migration |
+| Update cover/URL/details from Amazon | Re-scrape |

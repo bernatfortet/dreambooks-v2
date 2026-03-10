@@ -1,0 +1,23 @@
+---
+description: React code rules for components and hooks
+globs:
+  - '**/*.tsx'
+  - '**/*.jsx'
+alwaysApply: false
+---
+
+# React Code Rules
+
+- We're on 19.2 with compiler on.
+- No need to useMemo unless super important (very expensive calculations that we want to have control over)
+- Never use React.memo.
+
+#### Components
+
+- When a component has event functions, if that funciton doesn't require state (it's more pure) add it outside and below of the component function. This whay the separation is clearer
+- When creating a component I like to use a function. Destructure the props inside of the function not in the args.
+- **Prefer components over render functions**: Instead of `renderFoo()` functions, create proper `<Foo />` components with props. This follows React patterns and improves reusability.
+- **Component naming**: Use PascalCase for component names (e.g., `AirtableConnection`, not `renderAirtableConnection`)
+- **Move components outside**: Define components outside the main component, not as inner functions
+
+- **useEffectEvent**: Use to extract non-reactive logic from Effects. Call only inside Effects (useEffect, useLayoutEffect, useInsertionEffect). Use when you need to read the latest props/state without making them reactive dependencies. Do NOT use as a dependency shortcut—prefer explicit dependencies when values should trigger re-runs.
