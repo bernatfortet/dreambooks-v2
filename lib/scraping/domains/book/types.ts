@@ -48,6 +48,7 @@ export type Contributor = {
 
 export type BookData = {
   title: string | null
+  subtitle: string | null
   authors: string[] // Kept for backward compatibility - derived from contributors
   // Amazon author IDs extracted from byline links - used for linking to authors table
   amazonAuthorIds: string[] // Kept for backward compatibility - derived from contributors
@@ -74,6 +75,12 @@ export type BookData = {
   gradeLevelMin: number | null
   gradeLevelMax: number | null
   gradeLevelRaw: string | null // Original string from source (e.g., "3 - 7", "Preschool - 3")
+  // Ratings (for sorting, not display)
+  amazonRatingAverage: number | null
+  amazonRatingCount: number | null
+  goodreadsRatingAverage: number | null
+  goodreadsRatingCount: number | null
+  ratingScore: number | null
   // Series info
   seriesName: string | null
   seriesUrl: string | null
@@ -82,6 +89,8 @@ export type BookData = {
   formats: BookFormat[]
   // Per-edition data (optional - only populated when edition pages are visited)
   editions: EditionData[]
+  // Amazon category breadcrumbs (e.g., ["Books", "Children's Books", "Animals", "Cats"])
+  categories: string[]
 }
 
 // Type representing what Firecrawl extraction returns (matches bookExtractionSchema)

@@ -73,3 +73,25 @@ export function toOriginalAmazonImageUrl(url: string): string {
 
   return originalUrl
 }
+
+/**
+ * Transform Amazon image URL to a specific longest-side resolution.
+ * Used for author images (36px, 150px, 400px).
+ */
+export function toAmazonImageLongestSide(url: string, px: number): string {
+  if (!url || !url.includes('media-amazon.com/images')) return url
+
+  const sized = url.replace(AMAZON_IMAGE_SIZE_PATTERN, `._SL${px}_.`)
+  if (sized !== url) return sized
+
+  // Some Amazon image URLs have no size suffix at all. In that case, insert one
+  // before the file extension: .../images/I/FILE.jpg -> .../images/I/FILE._SL400_.jpg
+  const extensionMatch = url.match(/(\/images\/I\/[^?#]+?)(\.(?:jpe?g|png|webp|gif))([?#].*)?$/i)
+  if (!extensionMatch) return url
+
+  const base = extensionMatch[1]
+  const ext = extensionMatch[2]
+  const suffix = extensionMatch[3] ?? ''
+
+  return `${base}._SL${px}_${ext}${suffix}`
+}

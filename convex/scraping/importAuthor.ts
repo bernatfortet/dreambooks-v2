@@ -57,7 +57,7 @@ export const importFromLocalScrape = action({
       bio: args.authorData.bio,
       amazonAuthorId: args.authorData.amazonAuthorId,
       sourceUrl: args.authorData.sourceUrl,
-      imageSourceUrl: args.authorData.imageUrl,
+      sourceImageUrl: args.authorData.imageUrl,
       scrapeVersion: SCRAPE_VERSIONS.author,
       firstSeenFromUrl: args.firstSeenFromUrl,
       firstSeenReason: args.firstSeenReason,
@@ -75,7 +75,7 @@ export const importFromLocalScrape = action({
         authorId: result.authorId,
       })
 
-      if (!author?.imageStorageId) {
+      if (!author?.image?.storageIdMedium) {
         await context.scheduler.runAfter(0, internal.scraping.downloadAuthorImage.downloadAuthorImage, {
           authorId: result.authorId,
           sourceUrl: args.authorData.imageUrl,

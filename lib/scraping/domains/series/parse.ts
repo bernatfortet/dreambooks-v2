@@ -3,7 +3,7 @@ import { SeriesData, SeriesBookEntry, SeriesPagination, BookFormat, AuthorLink }
 import { FORMAT_PRIORITY } from '@/lib/scraping/domains/book/types'
 import { dumpPageHtml } from '@/lib/scraping/utils/html-dump'
 import { SCRAPING_CONFIG } from '@/lib/scraping/config'
-import { extractAsin, extractAuthorId } from '@/lib/scraping/utils/amazon-url'
+import { extractAsin, extractAuthorId, normalizeAmazonUrl } from '@/lib/scraping/utils/amazon-url'
 import type { Locator } from 'playwright'
 
 const { visibilityTimeoutMs, textContentTimeoutMs, attributeTimeoutMs } = SCRAPING_CONFIG.extraction
@@ -858,7 +858,8 @@ function extractAuthorsFromHtml(html: string): ExtractedAuthors {
 
       if (authorId && !seenAuthorIds.has(authorId)) {
         seenAuthorIds.add(authorId)
-        links.push({ name: authorName, url: fullUrl })
+        // Normalize URL to strip query params for consistent deduplication
+        links.push({ name: authorName, url: normalizeAmazonUrl(fullUrl) })
       }
     }
   }
@@ -907,7 +908,8 @@ async function extractAuthorsFromElement(element: Locator): Promise<ExtractedAut
 
           if (authorId && !seenAuthorIds.has(authorId)) {
             seenAuthorIds.add(authorId)
-            links.push({ name: trimmedName, url: fullUrl })
+            // Normalize URL to strip query params for consistent deduplication
+            links.push({ name: trimmedName, url: normalizeAmazonUrl(fullUrl) })
           }
         }
       }

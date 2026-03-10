@@ -59,6 +59,12 @@ const scrapedBookDataValidator = v.object({
   gradeLevelMax: v.optional(v.number()),
   // DEPRECATED: Old string format, kept during migration
   gradeLevel: v.optional(v.string()),
+  // Ratings (scraped, never displayed - used only for sorting)
+  amazonRatingAverage: v.optional(v.number()),
+  amazonRatingCount: v.optional(v.number()),
+  goodreadsRatingAverage: v.optional(v.number()),
+  goodreadsRatingCount: v.optional(v.number()),
+  ratingScore: v.optional(v.number()),
   seriesName: v.optional(v.string()),
   seriesUrl: v.optional(v.string()),
   seriesPosition: v.optional(v.number()),
@@ -130,8 +136,6 @@ export const importFromLocalScrape = action({
       authors: args.scrapedData.authors,
       amazonAuthorIds: args.scrapedData.amazonAuthorIds,
       contributors: args.scrapedData.contributors,
-      isbn10: args.scrapedData.isbn10,
-      isbn13: args.scrapedData.isbn13,
       asin: args.scrapedData.asin,
       amazonUrl: args.scrapedData.amazonUrl,
       seriesId, // Pass seriesId to enable title-within-series dedup
@@ -154,6 +158,11 @@ export const importFromLocalScrape = action({
       gradeLevelMin: args.scrapedData.gradeLevelMin,
       gradeLevelMax: args.scrapedData.gradeLevelMax,
       gradeLevel: args.scrapedData.gradeLevel,
+      amazonRatingAverage: args.scrapedData.amazonRatingAverage,
+      amazonRatingCount: args.scrapedData.amazonRatingCount,
+      goodreadsRatingAverage: args.scrapedData.goodreadsRatingAverage,
+      goodreadsRatingCount: args.scrapedData.goodreadsRatingCount,
+      ratingScore: args.scrapedData.ratingScore,
       source: 'playwright-local',
       scrapeVersion: SCRAPE_VERSIONS.book,
       detailsStatus: 'complete',

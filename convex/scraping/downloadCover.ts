@@ -6,14 +6,23 @@ import { v } from 'convex/values'
 import { Id } from '../_generated/dataModel'
 import { toHighResAmazonImageUrl, toMediumResAmazonImageUrl, toThumbResAmazonImageUrl } from './adapters/amazon/image'
 import imageSize from 'image-size'
+import * as jpeg from 'jpeg-js'
+import { PNG } from 'pngjs'
 
 const MAX_COVER_BYTES = 10 * 1024 * 1024 // 10MB
+const MAX_COLOR_SAMPLES = 1000
+const MIN_OPAQUE_ALPHA = 128
 
 type DownloadResult = {
   storageId: Id<'_storage'>
   width: number | null
   height: number | null
+  dominantColor?: string | null
 } | null
+
+type DownloadOptions = {
+  computeDominantColor?: boolean
+}
 
 /**
  * Download and store an image from a URL.
@@ -23,6 +32,7 @@ async function downloadAndStore(
   context: { storage: { store: (blob: Blob) => Promise<Id<'_storage'>> } },
   url: string,
   label: string,
+  options: DownloadOptions = {},
 ): Promise<DownloadResult> {
   try {
     const response = await fetch(url)
@@ -53,6 +63,7 @@ async function downloadAndStore(
     // Measure actual image dimensions from the blob
     let width: number | null = null
     let height: number | null = null
+    let dominantColor: string | null | undefined = undefined
 
     try {
       const arrayBuffer = await blob.arrayBuffer()
@@ -61,11 +72,18 @@ async function downloadAndStore(
       width = dimensions.width ?? null
       height = dimensions.height ?? null
       console.log(`📐 ${label} dimensions measured`, { width, height, url })
+
+      if (options.computeDominantColor) {
+        dominantColor = (await extractDominantColorFromBuffer(buffer)) ?? undefined
+        if (dominantColor) {
+          console.log(`🎨 ${label} dominant color extracted`, { dominantColor, url })
+        }
+      }
     } catch (dimensionError) {
       console.log(`⚠️ ${label} dimension measurement failed`, { error: dimensionError, url })
     }
 
-    return { storageId, width, height }
+    return { storageId, width, height, ...(dominantColor !== undefined && { dominantColor }) }
   } catch (error) {
     console.log(`⚠️ ${label} download error`, { error, url })
     return null
@@ -102,7 +120,7 @@ export const downloadCover = internalAction({
       const [fullResult, mediumResult, thumbResult] = await Promise.all([
         downloadAndStore(context, fullResUrl, 'Full-res'),
         downloadAndStore(context, mediumResUrl, 'Medium-res'),
-        downloadAndStore(context, thumbResUrl, 'Thumb-res'),
+        downloadAndStore(context, thumbResUrl, 'Thumb-res', { computeDominantColor: true }),
       ])
 
       // If all failed, try the original URL as fallback for medium
@@ -134,6 +152,8 @@ export const downloadCover = internalAction({
 
       console.log('📐 Final cover dimensions to store', { width, height, bookId: args.bookId })
 
+      const dominantColor = finalThumb?.dominantColor ?? null
+
       // Update book record with actual measured dimensions
       await context.runMutation(internal.books.mutations.updateCover, {
         bookId: args.bookId,
@@ -141,6 +161,7 @@ export const downloadCover = internalAction({
         coverStorageId: finalMedium!.storageId,
         coverStorageIdFull: finalFull!.storageId,
         coverBlurHash: undefined,
+        coverDominantColor: dominantColor ?? undefined,
         coverStatus: 'complete',
         width: width ?? undefined,
         height: height ?? undefined,
@@ -182,3 +203,73 @@ export const downloadCover = internalAction({
     }
   },
 })
+
+/**
+ * Extract dominant (average) color from an image buffer using pure JS decoders.
+ * Supports JPEG and PNG formats.
+ */
+async function extractDominantColorFromBuffer(buffer: Buffer): Promise<string | null> {
+  try {
+    const pixels = decodeImageToPixels(buffer)
+    if (!pixels) return null
+
+    return computeAverageColor(pixels)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Decode image buffer to raw RGBA pixel data.
+ * Returns { data: Uint8Array, width, height } or null if unsupported format.
+ */
+function decodeImageToPixels(buffer: Buffer): { data: Uint8Array; width: number; height: number } | null {
+  // Check for JPEG magic bytes (FFD8FF)
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    const decoded = jpeg.decode(buffer, { useTArray: true })
+    return { data: decoded.data, width: decoded.width, height: decoded.height }
+  }
+
+  // Check for PNG magic bytes (89504E47)
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+    const png = PNG.sync.read(buffer)
+    return { data: png.data, width: png.width, height: png.height }
+  }
+
+  return null
+}
+
+/**
+ * Compute average color from RGBA pixel data by sampling every Nth pixel.
+ */
+function computeAverageColor(pixels: { data: Uint8Array; width: number; height: number }): string | null {
+  const { data, width, height } = pixels
+  const totalPixels = width * height
+
+  // Sample every Nth pixel for performance (sample ~MAX_COLOR_SAMPLES pixels max)
+  const sampleStep = Math.max(1, Math.floor(totalPixels / MAX_COLOR_SAMPLES))
+
+  let r = 0
+  let g = 0
+  let b = 0
+  let count = 0
+
+  for (let i = 0; i < data.length; i += 4 * sampleStep) {
+    const alpha = data[i + 3]
+    // Skip fully transparent pixels
+    if (alpha < MIN_OPAQUE_ALPHA) continue
+
+    r += data[i]
+    g += data[i + 1]
+    b += data[i + 2]
+    count++
+  }
+
+  if (count === 0) return null
+
+  const avgR = Math.round(r / count)
+  const avgG = Math.round(g / count)
+  const avgB = Math.round(b / count)
+
+  return `#${[avgR, avgG, avgB].map((c) => c.toString(16).padStart(2, '0')).join('')}`
+}

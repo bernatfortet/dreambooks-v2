@@ -60,8 +60,9 @@ export const crawlBook = action({
         payloadJson: JSON.stringify(bookData),
       })
 
-      // Step 3: Save to database (idempotent upsert by asin/isbn13)
+      // Step 3: Save to database (idempotent upsert by asin/isbn13 via bookIdentifiers)
       // Convert null to undefined (Convex validators don't accept null)
+      // Note: isbn10/isbn13 passed for lookup only, not stored on books table
       const bookId: Id<'books'> = await context.runMutation(internal.books.mutations.upsertFromScrape, {
         title: bookData.title,
         authors: bookData.authors,

@@ -143,6 +143,8 @@ export function normalizeAmazonUrl(url: string): string {
 
   try {
     const parsed = new URL(url)
+    if (!parsed.hostname.includes('amazon.')) return url
+
     let pathname = parsed.pathname
 
     // Remove trailing slashes
@@ -180,12 +182,27 @@ export function normalizeSeriesUrlForScraping(url: string): string {
   if (!url) return url
 
   try {
-    const parsed = new URL(url)
+    const canonical = normalizeAmazonUrl(url)
+    const parsed = new URL(canonical)
 
     // Only modify Amazon URLs
     if (!parsed.hostname.includes('amazon.')) return url
 
-    // Set binding to paperback for consistent ASINs
+    // Force paperback format for consistent ASINs (prevents duplicates from format variations).
+    // For /dp/ASIN URLs, we can safely strip all params and re-add binding.
+    if (/^\/dp\/[A-Z0-9]+$/i.test(parsed.pathname)) {
+      parsed.search = ''
+      parsed.searchParams.set('binding', 'paperback')
+      return parsed.toString()
+    }
+
+    // For other series URL shapes (e.g. kindle-dbs/series where asin may be in query),
+    // remove obvious tracking params but preserve identifiers.
+    const paramsToRemove = ['ref', 'ref_', 'qid', 'sr', 'storeType']
+    for (const param of paramsToRemove) {
+      parsed.searchParams.delete(param)
+    }
+
     parsed.searchParams.set('binding', 'paperback')
 
     return parsed.toString()

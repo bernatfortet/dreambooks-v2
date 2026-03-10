@@ -55,6 +55,8 @@ export const SCRAPING_CONFIG = {
     beforeSeries: { min: 3000, max: 6000 },
     /** Delay after series processing (ms) */
     afterSeries: { min: 8000, max: 15000 },
+    /** Delay after format switch - shorter since minimal extraction needed (ms) */
+    formatSwitch: { min: 600, max: 1400 },
   },
   worker: {
     /** Default polling interval in seconds */

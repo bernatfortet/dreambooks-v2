@@ -34,6 +34,7 @@ export const crawlBookWithAmazon = internalAction({
 
     const data: BookData = {
       title: result.data.title ?? null,
+      subtitle: null,
       authors: result.data.authors ?? [],
       amazonAuthorIds: [], // Firecrawl can't extract this from links
       contributors: (result.data.authors ?? []).map((name) => ({
@@ -63,8 +64,14 @@ export const crawlBookWithAmazon = internalAction({
       seriesName: result.data.seriesName ?? null,
       seriesUrl: result.data.seriesUrl ?? null,
       seriesPosition: result.data.seriesPosition ?? null,
+      amazonRatingAverage: null, // Firecrawl can't extract ratings
+      amazonRatingCount: null,
+      goodreadsRatingAverage: null,
+      goodreadsRatingCount: null,
+      ratingScore: null,
       formats: [], // Firecrawl can't extract format options
       editions: [], // Firecrawl can't extract edition data
+      categories: [],
     }
 
     console.log('✅ Amazon book extraction complete', {

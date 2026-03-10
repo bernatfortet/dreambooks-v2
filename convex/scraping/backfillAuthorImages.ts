@@ -6,8 +6,8 @@ import { v } from 'convex/values'
 import type { Id } from '../_generated/dataModel'
 
 /**
- * Backfill author images for existing authors that have imageSourceUrl
- * but no imageStorageId. Schedules downloads with staggered delays to
+ * Backfill author images for existing authors that have `image.sourceImageUrl`
+ * but no stored image yet. Schedules downloads with staggered delays to
  * avoid thundering herd.
  */
 export const backfillAuthorImages = internalAction({

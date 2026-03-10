@@ -58,6 +58,7 @@ async function scrapeBookWithFirecrawl(url: string): Promise<ScrapeResult<BookDa
 
   const normalized: BookData = {
     title: result.data.title ?? null,
+    subtitle: null,
     authors: result.data.authors ?? [],
     amazonAuthorIds: [], // Firecrawl can't extract this from links
     contributors: (result.data.authors ?? []).map((name) => ({
@@ -87,8 +88,14 @@ async function scrapeBookWithFirecrawl(url: string): Promise<ScrapeResult<BookDa
     seriesName: result.data.seriesName ?? null,
     seriesUrl: result.data.seriesUrl ?? null,
     seriesPosition: result.data.seriesPosition ?? null,
+    amazonRatingAverage: null,
+    amazonRatingCount: null,
+    goodreadsRatingAverage: null,
+    goodreadsRatingCount: null,
+    ratingScore: null,
     formats: [], // Firecrawl can't extract format options
     editions: [], // Firecrawl can't extract edition data
+    categories: [],
   }
 
   return { success: true, data: normalized }

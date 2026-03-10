@@ -422,7 +422,12 @@ function extractImageSize(url: string): number {
 }
 
 function upgradeImageUrl(url: string): string {
-  // Replace small image size markers with larger ones
-  // Common patterns: ._SY200_, ._SX200_, ._SL200_ → ._SL1500_
-  return url.replace(/\._S[XYL]\d+_/, '._SL1500_')
+  if (!url || !url.includes('media-amazon.com/images')) {
+    return url
+  }
+
+  // Remove all size/crop parameters and replace with SL800 to limit to 800px max edge
+  // Matches: ._SY522_., ._AC_SX200_SY200_., ._SL1500_., etc.
+  const AMAZON_IMAGE_SIZE_PATTERN = /\.(_[A-Z][A-Z0-9_]*_)\./
+  return url.replace(AMAZON_IMAGE_SIZE_PATTERN, '._SL800_.')
 }
