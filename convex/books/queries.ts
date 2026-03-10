@@ -2,24 +2,7 @@ import { query, internalQuery } from '../_generated/server'
 import { paginationOptsValidator } from 'convex/server'
 import { v } from 'convex/values'
 import { Id, Doc } from '../_generated/dataModel'
-
-/**
- * Helper to resolve cover URLs from storage IDs in nested cover object.
- */
-async function resolveCoverUrls(
-  storage: { getUrl: (id: Id<'_storage'>) => Promise<string | null> },
-  book: Doc<'books'>,
-): Promise<{ coverUrl: string | null; coverUrlThumb: string | null; coverUrlFull: string | null }> {
-  const mediumId = book.cover?.storageIdMedium
-  const thumbId = book.cover?.storageIdThumb
-  const fullId = book.cover?.storageIdFull
-
-  const coverUrl = mediumId ? await storage.getUrl(mediumId) : null
-  const coverUrlThumb = thumbId ? await storage.getUrl(thumbId) : coverUrl
-  const coverUrlFull = fullId ? await storage.getUrl(fullId) : coverUrl
-
-  return { coverUrl, coverUrlThumb, coverUrlFull }
-}
+import { resolveBookCoverUrls } from '../lib/bookCoverUrls'
 
 /**
  * Get cover dimensions from nested cover object.
@@ -38,7 +21,7 @@ export const list = query({
     // Resolve cover URLs for all books
     const booksWithUrls = await Promise.all(
       books.map(async (book) => {
-        const { coverUrl, coverUrlThumb } = await resolveCoverUrls(context.storage, book)
+        const { coverUrl, coverUrlThumb } = await resolveBookCoverUrls(context.storage, book)
         return { ...book, coverUrl, coverUrlThumb }
       }),
     )
@@ -56,7 +39,7 @@ export const listPaginated = query({
 
     const booksWithUrls = await Promise.all(
       paginatedResult.page.map(async (book) => {
-        const { coverUrl, coverUrlThumb } = await resolveCoverUrls(context.storage, book)
+        const { coverUrl, coverUrlThumb } = await resolveBookCoverUrls(context.storage, book)
         return { ...book, coverUrl, coverUrlThumb }
       }),
     )
@@ -192,7 +175,7 @@ export const listPaginatedWithFilters = query({
     // Resolve cover URLs
     const booksWithUrls = await Promise.all(
       page.map(async (book) => {
-        const { coverUrl, coverUrlThumb } = await resolveCoverUrls(context.storage, book)
+        const { coverUrl, coverUrlThumb } = await resolveBookCoverUrls(context.storage, book)
         return { ...book, coverUrl, coverUrlThumb }
       }),
     )
@@ -237,7 +220,7 @@ export const listForGrid = query({
 
     const page = await Promise.all(
       result.page.map(async (book) => {
-        const { coverUrl, coverUrlThumb } = await resolveCoverUrls(context.storage, book)
+        const { coverUrl, coverUrlThumb } = await resolveBookCoverUrls(context.storage, book)
 
         return {
           _id: book._id,
@@ -265,7 +248,7 @@ export const get = query({
     const book = (await context.db.get(args.id)) as Doc<'books'> | null
     if (!book) return null
 
-    const { coverUrl, coverUrlThumb, coverUrlFull } = await resolveCoverUrls(context.storage, book)
+    const { coverUrl, coverUrlThumb, coverUrlFull } = await resolveBookCoverUrls(context.storage, book)
     const { coverWidth, coverHeight } = getCoverDimensions(book)
 
     // Include series info if book is linked to a series
@@ -300,7 +283,7 @@ export const getBySlug = query({
     // Join primary edition for Amazon link (1 extra read)
     const primaryEdition = book.primaryEditionId ? await context.db.get(book.primaryEditionId) : null
 
-    const { coverUrl, coverUrlThumb, coverUrlFull } = await resolveCoverUrls(context.storage, book)
+    const { coverUrl, coverUrlThumb, coverUrlFull } = await resolveBookCoverUrls(context.storage, book)
     const { coverWidth, coverHeight } = getCoverDimensions(book)
 
     // Include series info if book is linked to a series
@@ -330,7 +313,7 @@ export const getBySlugOrId = query({
   handler: async (context, args) => {
     // Helper to get cover URLs and series info
     const enrichBook = async (book: Doc<'books'>) => {
-      const { coverUrl, coverUrlThumb, coverUrlFull } = await resolveCoverUrls(context.storage, book)
+      const { coverUrl, coverUrlThumb, coverUrlFull } = await resolveBookCoverUrls(context.storage, book)
       const { coverWidth, coverHeight } = getCoverDimensions(book)
 
       let seriesInfo = null
