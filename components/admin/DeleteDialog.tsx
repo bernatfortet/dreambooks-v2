@@ -16,6 +16,10 @@ type DeleteDialogProps = {
   entityId: EntityId
   entityName: string
   onDeleted?: () => void
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  redirectTo?: string | null
+  showDefaultTrigger?: boolean
 }
 
 const mutationMap = {
@@ -30,12 +34,22 @@ const warningMessages = {
   author: 'This will permanently delete this author and unlink them from books. Books will NOT be deleted.',
 } as const
 
-export function DeleteDialog({ entityType, entityId, entityName, onDeleted }: DeleteDialogProps) {
+export function DeleteDialog({
+  entityType,
+  entityId,
+  entityName,
+  onDeleted,
+  open,
+  onOpenChange,
+  redirectTo = '/ad',
+  showDefaultTrigger = true,
+}: DeleteDialogProps) {
   const deleteMutation = useMutation(mutationMap[entityType])
   const router = useRouter()
 
-  const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [internalIsDialogOpen, setInternalIsDialogOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const isDialogOpen = open ?? internalIsDialogOpen
 
   async function handleDelete() {
     setIsDeleting(true)
@@ -47,11 +61,14 @@ export function DeleteDialog({ entityType, entityId, entityName, onDeleted }: De
       } else {
         await deleteMutation({ authorId: entityId as Id<'authors'> })
       }
-      setIsDialogOpen(false)
+      setDialogOpen(false)
       onDeleted?.()
 
-      // Redirect to admin page after deletion
-      router.push('/ad')
+      if (redirectTo) {
+        router.push(redirectTo)
+      } else {
+        router.refresh()
+      }
     } catch (error) {
       console.error(`Failed to delete ${entityType}`, error)
       alert(`Failed to delete ${entityType}. Check console for details.`)
@@ -62,11 +79,13 @@ export function DeleteDialog({ entityType, entityId, entityName, onDeleted }: De
 
   return (
     <>
-      <Button variant='destructive' size='sm' onClick={() => setIsDialogOpen(true)}>
-        🗑️ Delete
-      </Button>
+      {showDefaultTrigger ? (
+        <Button variant='destructive' size='sm' onClick={() => setDialogOpen(true)}>
+          🗑️ Delete
+        </Button>
+      ) : null}
 
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+      <Dialog open={isDialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete {entityType.charAt(0).toUpperCase() + entityType.slice(1)}</DialogTitle>
@@ -78,7 +97,7 @@ export function DeleteDialog({ entityType, entityId, entityName, onDeleted }: De
             <p className='text-sm text-destructive'>{warningMessages[entityType]}</p>
           </div>
           <DialogFooter>
-            <Button variant='outline' onClick={() => setIsDialogOpen(false)} disabled={isDeleting}>
+            <Button variant='outline' onClick={() => setDialogOpen(false)} disabled={isDeleting}>
               Cancel
             </Button>
             <Button variant='destructive' onClick={handleDelete} disabled={isDeleting}>
@@ -89,4 +108,12 @@ export function DeleteDialog({ entityType, entityId, entityName, onDeleted }: De
       </Dialog>
     </>
   )
+
+  function setDialogOpen(nextOpen: boolean) {
+    onOpenChange?.(nextOpen)
+
+    if (open !== undefined) return
+
+    setInternalIsDialogOpen(nextOpen)
+  }
 }

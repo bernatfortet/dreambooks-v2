@@ -3,6 +3,7 @@ import { v } from 'convex/values'
 import { internal } from '../_generated/api'
 import { generateUniqueSlug, generateUniqueBookSlug } from '../lib/slug'
 import { deleteScrapeArtifacts, clearScrapeQueueReferences, deleteStorageFile } from '../lib/deleteHelpers'
+import { requireSuperadmin } from '../lib/superadmin'
 import { buildSearchText } from './lib/searchText'
 import type { DatabaseReader, MutationCtx } from '../_generated/server'
 import type { Doc, Id } from '../_generated/dataModel'
@@ -467,6 +468,8 @@ export const deleteBook = mutation({
   },
   returns: v.null(),
   handler: async (context, args) => {
+    await requireSuperadmin(context)
+
     const book = await context.db.get(args.bookId)
 
     if (!book) {

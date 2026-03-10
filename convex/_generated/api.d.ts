@@ -34,6 +34,7 @@ import type * as books_queries from "../books/queries.js";
 import type * as crons from "../crons.js";
 import type * as debug_queries from "../debug/queries.js";
 import type * as http from "../http.js";
+import type * as lib_authTokenProfile from "../lib/authTokenProfile.js";
 import type * as lib_badScrape from "../lib/badScrape.js";
 import type * as lib_bookCoverUrls from "../lib/bookCoverUrls.js";
 import type * as lib_deleteHelpers from "../lib/deleteHelpers.js";
@@ -45,6 +46,7 @@ import type * as lib_scraping_providers_firecrawl_client from "../lib/scraping/p
 import type * as lib_scraping_types from "../lib/scraping/types.js";
 import type * as lib_scraping_utils_amazonUrl from "../lib/scraping/utils/amazonUrl.js";
 import type * as lib_slug from "../lib/slug.js";
+import type * as lib_superadmin from "../lib/superadmin.js";
 import type * as lib_utils_ageRange from "../lib/utils/ageRange.js";
 import type * as lib_utils_gradeLevel from "../lib/utils/gradeLevel.js";
 import type * as migrations_backfillDetailsStatus from "../migrations/backfillDetailsStatus.js";
@@ -109,6 +111,7 @@ declare const fullApi: ApiFromModules<{
   crons: typeof crons;
   "debug/queries": typeof debug_queries;
   http: typeof http;
+  "lib/authTokenProfile": typeof lib_authTokenProfile;
   "lib/badScrape": typeof lib_badScrape;
   "lib/bookCoverUrls": typeof lib_bookCoverUrls;
   "lib/deleteHelpers": typeof lib_deleteHelpers;
@@ -120,6 +123,7 @@ declare const fullApi: ApiFromModules<{
   "lib/scraping/types": typeof lib_scraping_types;
   "lib/scraping/utils/amazonUrl": typeof lib_scraping_utils_amazonUrl;
   "lib/slug": typeof lib_slug;
+  "lib/superadmin": typeof lib_superadmin;
   "lib/utils/ageRange": typeof lib_utils_ageRange;
   "lib/utils/gradeLevel": typeof lib_utils_gradeLevel;
   "migrations/backfillDetailsStatus": typeof migrations_backfillDetailsStatus;
