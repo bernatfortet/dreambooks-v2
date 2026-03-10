@@ -13,11 +13,8 @@ const nextConfig: NextConfig = {
         protocol: 'https',
         hostname: 'convex.cloud',
       },
-      {
-        // Amazon image URLs
-        protocol: 'https',
-        hostname: 'm.media-amazon.com',
-      },
+      { protocol: 'https', hostname: 'm.media-amazon.com' },
+      { protocol: 'https', hostname: 'via.placeholder.com' },
     ],
   },
 }

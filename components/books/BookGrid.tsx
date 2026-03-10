@@ -7,13 +7,18 @@ import { Button } from '@/components/ui/button'
 import { BookCard } from '@/components/books/BookCard'
 import { Id } from '@/convex/_generated/dataModel'
 import type { BookFilters } from './filters/types'
+import { BookMasonryGrid, BookMasonryList, type BookMasonryItem } from './masonry'
 
 type BookItem = {
   _id: string
   slug?: string | null
   title: string
   authors: string[]
-  coverUrl: string | null
+  cover?: {
+    url?: string | null
+    width?: number
+    height?: number
+  } | null
   seriesPosition?: number | null
 }
 
@@ -34,24 +39,18 @@ type BookGridListProps = {
 }
 
 export function BookGridList({ books, className }: BookGridListProps) {
-  if (books.length === 0) {
-    return <p className='text-center text-muted-foreground py-12'>No books yet.</p>
-  }
+  const masonryBooks: BookMasonryItem[] = books.map((book) => ({
+    _id: book._id,
+    slug: book.slug,
+    title: book.title,
+    authors: book.authors,
+    coverUrl: book.cover?.url ?? null,
+    coverWidth: book.cover?.width ?? 200,
+    coverHeight: book.cover?.height ?? 300,
+    seriesPosition: book.seriesPosition,
+  }))
 
-  return (
-    <BookGridContainer className={className}>
-      {books.map((book) => (
-        <BookCard
-          key={book._id}
-          slug={book.slug ?? book._id}
-          title={book.title}
-          authors={book.authors}
-          coverUrl={book.coverUrl}
-          seriesPosition={book.seriesPosition}
-        />
-      ))}
-    </BookGridContainer>
-  )
+  return <BookMasonryList books={masonryBooks} className={className} />
 }
 
 type BookGridProps = {
@@ -59,53 +58,7 @@ type BookGridProps = {
 }
 
 export function BookGrid({ filters }: BookGridProps) {
-  const hasFilters = filters && Object.keys(filters).some((key) => filters[key as keyof BookFilters] !== undefined)
-
-  const queryArgs = hasFilters
-    ? {
-        filters: {
-          ...(filters.ageRangeBuckets && filters.ageRangeBuckets.length > 0 && { ageRangeBuckets: filters.ageRangeBuckets }),
-          ...(filters.gradeLevelBuckets && filters.gradeLevelBuckets.length > 0 && { gradeLevelBuckets: filters.gradeLevelBuckets }),
-          ...(filters.awardIds &&
-            filters.awardIds.length > 0 && {
-              awardIds: filters.awardIds as Id<'awards'>[],
-            }),
-          ...(filters.seriesFilter && filters.seriesFilter !== 'all' && { seriesFilter: filters.seriesFilter }),
-        },
-      }
-    : {}
-
-  const query = hasFilters ? api.books.queries.listPaginatedWithFilters : api.books.queries.listPaginated
-
-  const { results, status, loadMore } = usePaginatedQuery(query as any, queryArgs, { initialNumItems: 24 }) as {
-    results: BookItem[]
-    status: 'LoadingFirstPage' | 'LoadingMore' | 'CanLoadMore' | 'Exhausted'
-    loadMore: (numItems: number) => void
-  }
-
-  if (status === 'LoadingFirstPage') {
-    return <BookGridSkeleton />
-  }
-
-  return (
-    <div className='space-y-8'>
-      <BookGridList books={results} />
-
-      {status === 'CanLoadMore' && (
-        <div className='flex justify-center'>
-          <Button variant='outline' onClick={() => loadMore(24)}>
-            Load more
-          </Button>
-        </div>
-      )}
-
-      {status === 'LoadingMore' && (
-        <div className='flex justify-center'>
-          <p className='text-muted-foreground'>Loading...</p>
-        </div>
-      )}
-    </div>
-  )
+  return <BookMasonryGrid filters={filters} />
 }
 
 type BookGridSkeletonProps = {

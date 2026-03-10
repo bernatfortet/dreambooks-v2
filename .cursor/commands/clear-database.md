@@ -1,0 +1,1 @@
+Use the @.cursor/skills/clear-database/ skill to clear the database. This will delete all books, series, authors, scrape queue, and storage files while preserving awards. Useful for testing scraping systems and resetting the database during development.

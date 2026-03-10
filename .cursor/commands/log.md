@@ -1,0 +1,1 @@
+Read the worker-logs.txt file and use the @.cursor/skills/inspect-worker-logs/ skill to assess if there's anything worthy of attention. Check for failures, errors, or unusual patterns in the recent worker activity. Provide a summary of findings and highlight any issues that need attention.

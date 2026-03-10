@@ -42,3 +42,7 @@ next-env.d.ts
 
 # local scraping output
 /scripts/output/
+
+# debug artifacts
+.cursor/debug-html/
+worker-logs.txt
