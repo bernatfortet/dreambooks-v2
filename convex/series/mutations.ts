@@ -741,6 +741,7 @@ export const saveFromCliScrape = mutation({
     description: v.optional(v.string()),
     coverImageUrl: v.optional(v.string()),
     expectedBookCount: v.optional(v.number()),
+    discoveredBookCount: v.optional(v.number()),
     scrapeVersion: v.optional(v.number()),
     skipCoverDownload: v.optional(v.boolean()),
     books: v.array(
@@ -831,7 +832,7 @@ export const saveFromCliScrape = mutation({
       coverImageUrl: args.coverImageUrl,
       expectedBookCount: args.expectedBookCount,
       scrapeVersion: args.scrapeVersion,
-      booksFound: args.books.length,
+      booksFound: args.discoveredBookCount ?? args.books.length,
       pagination: args.pagination,
     })
 

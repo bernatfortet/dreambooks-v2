@@ -3,6 +3,31 @@ import { v } from 'convex/values'
 import { Id, Doc } from '../_generated/dataModel'
 
 /**
+ * Build book cover object for series queries.
+ */
+async function buildBookCover(
+  storage: { getUrl: (id: Id<'_storage'>) => Promise<string | null> },
+  book: Doc<'books'>,
+): Promise<{
+  url: string | null
+  width: number
+  height: number
+  blurHash: string | null
+}> {
+  const coverStorageId = book.cover?.storageIdMedium
+  const url = coverStorageId ? await storage.getUrl(coverStorageId) : null
+  const width = book.cover?.width && book.cover.width > 0 ? book.cover.width : 200
+  const height = book.cover?.height && book.cover.height > 0 ? book.cover.height : 300
+
+  return {
+    url,
+    width,
+    height,
+    blurHash: book.cover?.blurHash ?? null,
+  }
+}
+
+/**
  * List all series for display.
  */
 export const list = query({
@@ -87,9 +112,7 @@ export const getWithBooks = query({
 
     const booksWithCovers = await Promise.all(
       books.map(async (book) => {
-        // Check nested cover first, fall back to flat field
-        const bookCoverStorageId = book.cover?.storageIdMedium
-        const bookCoverUrl = bookCoverStorageId ? await context.storage.getUrl(bookCoverStorageId) : null
+        const cover = await buildBookCover(context.storage, book)
 
         return {
           _id: book._id,
@@ -97,7 +120,7 @@ export const getWithBooks = query({
           title: book.title,
           authors: book.authors,
           seriesPosition: book.seriesPosition,
-          coverUrl: bookCoverUrl,
+          cover,
         }
       }),
     )
@@ -138,9 +161,7 @@ export const getWithBooksBySlug = query({
 
     const booksWithCovers = await Promise.all(
       books.map(async (book) => {
-        // Check nested cover first, fall back to flat field
-        const bookCoverStorageId = book.cover?.storageIdMedium
-        const bookCoverUrl = bookCoverStorageId ? await context.storage.getUrl(bookCoverStorageId) : null
+        const cover = await buildBookCover(context.storage, book)
 
         return {
           _id: book._id,
@@ -148,7 +169,7 @@ export const getWithBooksBySlug = query({
           title: book.title,
           authors: book.authors,
           seriesPosition: book.seriesPosition,
-          coverUrl: bookCoverUrl,
+          cover,
         }
       }),
     )
@@ -224,9 +245,7 @@ export const getWithBooksBySlugOrId = query({
 
     const booksWithCovers = await Promise.all(
       books.map(async (book) => {
-        // Check nested cover first, fall back to flat field
-        const bookCoverStorageId = book.cover?.storageIdMedium
-        const bookCoverUrl = bookCoverStorageId ? await context.storage.getUrl(bookCoverStorageId) : null
+        const cover = await buildBookCover(context.storage, book)
 
         return {
           _id: book._id,
@@ -234,7 +253,7 @@ export const getWithBooksBySlugOrId = query({
           title: book.title,
           authors: book.authors,
           seriesPosition: book.seriesPosition,
-          coverUrl: bookCoverUrl,
+          cover,
         }
       }),
     )
@@ -271,7 +290,6 @@ export const getWithDiscoveries = query({
 
     const booksWithCovers = await Promise.all(
       books.map(async (book) => {
-        // Check nested cover first, fall back to flat field
         const bookCoverStorageId = book.cover?.storageIdMedium
         const bookCoverUrl = bookCoverStorageId ? await context.storage.getUrl(bookCoverStorageId) : null
 
@@ -280,7 +298,7 @@ export const getWithDiscoveries = query({
           title: book.title,
           authors: book.authors,
           seriesPosition: book.seriesPosition,
-          coverUrl: bookCoverUrl,
+          cover: { url: bookCoverUrl },
           detailsStatus: book.detailsStatus,
           coverStatus: book.coverStatus,
         }

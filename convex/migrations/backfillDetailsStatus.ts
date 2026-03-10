@@ -41,11 +41,7 @@ export const run = internalMutation({
       }
 
       // Determine status based on data completeness
-      const hasFullDetails = Boolean(
-        book.description &&
-        book.isbn13 &&
-        book.publisher
-      )
+      const hasFullDetails = Boolean(book.description && book.publisher)
 
       const newStatus = hasFullDetails ? 'complete' : 'basic'
 

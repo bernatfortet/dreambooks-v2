@@ -1,49 +1,119 @@
 import { query, internalQuery } from '../_generated/server'
+import type { DatabaseReader } from '../_generated/server'
 import { paginationOptsValidator } from 'convex/server'
 import { v } from 'convex/values'
 import { Id, Doc } from '../_generated/dataModel'
 
 /**
- * Helper to resolve cover URLs from storage IDs in nested cover object.
+ * Helper to resolve cover URLs from storage IDs and build enriched cover object.
+ * Returns the full cover object with resolved URLs merged in.
  */
-async function resolveCoverUrls(
+async function resolveCover(
   storage: { getUrl: (id: Id<'_storage'>) => Promise<string | null> },
   book: Doc<'books'>,
-): Promise<{ coverUrl: string | null; coverUrlThumb: string | null; coverUrlFull: string | null }> {
+): Promise<{
+  url: string | null
+  urlThumb: string | null
+  urlFull: string | null
+  width: number
+  height: number
+  blurHash: string | null
+  dominantColor: string | null
+  sourceUrl: string | null
+  sourceAsin: string | null
+  sourceFormat: string | null
+}> {
   const mediumId = book.cover?.storageIdMedium
   const thumbId = book.cover?.storageIdThumb
   const fullId = book.cover?.storageIdFull
 
-  const coverUrl = mediumId ? await storage.getUrl(mediumId) : null
-  const coverUrlThumb = thumbId ? await storage.getUrl(thumbId) : coverUrl
-  const coverUrlFull = fullId ? await storage.getUrl(fullId) : coverUrl
+  const url = mediumId ? await storage.getUrl(mediumId) : null
+  const urlThumb = thumbId ? await storage.getUrl(thumbId) : url
+  const urlFull = fullId ? await storage.getUrl(fullId) : url
 
-  return { coverUrl, coverUrlThumb, coverUrlFull }
+  // Default to 2/3 aspect ratio (standard book cover) if dimensions missing
+  const width = book.cover?.width && book.cover.width > 0 ? book.cover.width : 200
+  const height = book.cover?.height && book.cover.height > 0 ? book.cover.height : 300
+
+  return {
+    url,
+    urlThumb,
+    urlFull,
+    width,
+    height,
+    blurHash: book.cover?.blurHash ?? null,
+    dominantColor: book.cover?.dominantColor ?? null,
+    sourceUrl: book.cover?.sourceUrl ?? null,
+    sourceAsin: book.cover?.sourceAsin ?? null,
+    sourceFormat: book.cover?.sourceFormat ?? null,
+  }
 }
 
 /**
- * Get cover dimensions from nested cover object.
+ * Get linked authors for a book with their canonical names and slugs.
  */
-function getCoverDimensions(book: Doc<'books'>): { coverWidth: number | undefined; coverHeight: number | undefined } {
-  return {
-    coverWidth: book.cover?.width,
-    coverHeight: book.cover?.height,
-  }
+async function getLinkedAuthors(
+  db: DatabaseReader,
+  bookId: Id<'books'>,
+): Promise<Array<{ _id: Id<'authors'>; name: string; slug: string | undefined; amazonAuthorId: string; role: string | undefined }>> {
+  const links = await db
+    .query('bookAuthors')
+    .withIndex('by_bookId', (q) => q.eq('bookId', bookId))
+    .collect()
+
+  const authorCache = new Map<Id<'authors'>, Doc<'authors'> | null>()
+
+  const authors = await Promise.all(
+    links.map(async (link) => {
+      const cached = authorCache.get(link.authorId)
+      if (cached !== undefined) {
+        if (!cached) return null
+        return {
+          _id: cached._id,
+          name: cached.name,
+          slug: cached.slug,
+          amazonAuthorId: cached.amazonAuthorId,
+          role: link.role,
+        }
+      }
+
+      const author = (await db.get(link.authorId)) as Doc<'authors'> | null
+      authorCache.set(link.authorId, author)
+      if (!author) return null
+      return {
+        _id: author._id,
+        name: author.name,
+        slug: author.slug,
+        amazonAuthorId: author.amazonAuthorId,
+        role: link.role,
+      }
+    }),
+  )
+
+  return authors.filter((author): author is NonNullable<typeof author> => author !== null)
 }
 
 export const list = query({
   handler: async (context) => {
-    const books = await context.db.query('books').order('desc').collect()
+    const books = await context.db.query('books').collect()
+
+    // Sort by ratingScore desc, then _creationTime desc as tie-breaker
+    books.sort((a, b) => {
+      const scoreA = a.ratingScore ?? 0
+      const scoreB = b.ratingScore ?? 0
+      if (scoreB !== scoreA) return scoreB - scoreA
+      return b._creationTime - a._creationTime
+    })
 
     // Resolve cover URLs for all books
-    const booksWithUrls = await Promise.all(
+    const booksWithCovers = await Promise.all(
       books.map(async (book) => {
-        const { coverUrl, coverUrlThumb } = await resolveCoverUrls(context.storage, book)
-        return { ...book, coverUrl, coverUrlThumb }
+        const cover = await resolveCover(context.storage, book)
+        return { ...book, cover }
       }),
     )
 
-    return booksWithUrls
+    return booksWithCovers
   },
 })
 
@@ -52,18 +122,19 @@ export const listPaginated = query({
     paginationOpts: paginationOptsValidator,
   },
   handler: async (context, args) => {
-    const paginatedResult = await context.db.query('books').order('desc').paginate(args.paginationOpts)
+    // Use index-based pagination by ratingScore (index implicitly includes _creationTime as tie-breaker)
+    const paginatedResult = await context.db.query('books').withIndex('by_ratingScore').order('desc').paginate(args.paginationOpts)
 
-    const booksWithUrls = await Promise.all(
+    const booksWithCovers = await Promise.all(
       paginatedResult.page.map(async (book) => {
-        const { coverUrl, coverUrlThumb } = await resolveCoverUrls(context.storage, book)
-        return { ...book, coverUrl, coverUrlThumb }
+        const cover = await resolveCover(context.storage, book)
+        return { ...book, cover }
       }),
     )
 
     return {
       ...paginatedResult,
-      page: booksWithUrls,
+      page: booksWithCovers,
     }
   },
 })
@@ -175,6 +246,14 @@ export const listPaginatedWithFilters = query({
       allBooks = allBooks.filter((book) => bookIdsWithAwards.has(book._id))
     }
 
+    // Sort by ratingScore desc, then _creationTime desc as tie-breaker
+    allBooks.sort((a, b) => {
+      const scoreA = a.ratingScore ?? 0
+      const scoreB = b.ratingScore ?? 0
+      if (scoreB !== scoreA) return scoreB - scoreA
+      return b._creationTime - a._creationTime
+    })
+
     // Apply pagination manually
     // Find start index based on cursor
     let startIndex = 0
@@ -190,10 +269,10 @@ export const listPaginatedWithFilters = query({
     const page = allBooks.slice(startIndex, endIndex)
 
     // Resolve cover URLs
-    const booksWithUrls = await Promise.all(
+    const booksWithCovers = await Promise.all(
       page.map(async (book) => {
-        const { coverUrl, coverUrlThumb } = await resolveCoverUrls(context.storage, book)
-        return { ...book, coverUrl, coverUrlThumb }
+        const cover = await resolveCover(context.storage, book)
+        return { ...book, cover }
       }),
     )
 
@@ -202,7 +281,7 @@ export const listPaginatedWithFilters = query({
     const continueCursor = !isDone && lastBook ? lastBook._id : null
 
     return {
-      page: booksWithUrls,
+      page: booksWithCovers,
       isDone,
       continueCursor,
     }
@@ -225,19 +304,22 @@ export const listForGrid = query({
         slug: v.union(v.string(), v.null()),
         authors: v.array(v.string()),
         seriesPosition: v.union(v.number(), v.null()),
-        coverUrl: v.union(v.string(), v.null()),
-        coverUrlThumb: v.union(v.string(), v.null()),
+        cover: v.object({
+          url: v.union(v.string(), v.null()),
+          urlThumb: v.union(v.string(), v.null()),
+        }),
       }),
     ),
     isDone: v.boolean(),
     continueCursor: v.union(v.string(), v.null()),
   }),
   handler: async (context, args) => {
-    const result = await context.db.query('books').order('desc').paginate(args.paginationOpts)
+    // Use index-based pagination by ratingScore (index implicitly includes _creationTime as tie-breaker)
+    const result = await context.db.query('books').withIndex('by_ratingScore').order('desc').paginate(args.paginationOpts)
 
     const page = await Promise.all(
       result.page.map(async (book) => {
-        const { coverUrl, coverUrlThumb } = await resolveCoverUrls(context.storage, book)
+        const cover = await resolveCover(context.storage, book)
 
         return {
           _id: book._id,
@@ -245,8 +327,10 @@ export const listForGrid = query({
           slug: book.slug ?? null,
           authors: book.authors,
           seriesPosition: book.seriesPosition ?? null,
-          coverUrl,
-          coverUrlThumb,
+          cover: {
+            url: cover.url,
+            urlThumb: cover.urlThumb,
+          },
         }
       }),
     )
@@ -265,25 +349,27 @@ export const get = query({
     const book = (await context.db.get(args.id)) as Doc<'books'> | null
     if (!book) return null
 
-    const { coverUrl, coverUrlThumb, coverUrlFull } = await resolveCoverUrls(context.storage, book)
-    const { coverWidth, coverHeight } = getCoverDimensions(book)
+    const cover = await resolveCover(context.storage, book)
 
     // Include series info if book is linked to a series
-    let seriesInfo = null
-    if (book.seriesId) {
-      const series = (await context.db.get(book.seriesId)) as Doc<'series'> | null
-      if (series) {
-        seriesInfo = {
-          _id: series._id,
-          name: series.name,
-          slug: series.slug,
-          sourceUrl: series.sourceUrl,
-          scrapeStatus: series.scrapeStatus,
+      let seriesInfo = null
+      if (book.seriesId) {
+        const series = (await context.db.get(book.seriesId)) as Doc<'series'> | null
+        if (series) {
+          seriesInfo = {
+            _id: series._id,
+            name: series.name,
+            slug: series.slug,
+            sourceUrl: series.sourceUrl,
+            scrapeStatus: series.scrapeStatus,
+            expectedBookCount: series.expectedBookCount,
+            discoveredBookCount: series.discoveredBookCount,
+            scrapedBookCount: series.scrapedBookCount,
+          }
         }
       }
-    }
 
-    return { ...book, coverUrl, coverUrlThumb, coverUrlFull, coverWidth, coverHeight, seriesInfo }
+      return { ...book, cover, seriesInfo }
   },
 })
 
@@ -297,11 +383,10 @@ export const getBySlug = query({
 
     if (!book) return null
 
-    // Join primary edition for Amazon link (1 extra read)
+    // Join primary edition for Amazon link and ISBNs (1 extra read)
     const primaryEdition = book.primaryEditionId ? await context.db.get(book.primaryEditionId) : null
 
-    const { coverUrl, coverUrlThumb, coverUrlFull } = await resolveCoverUrls(context.storage, book)
-    const { coverWidth, coverHeight } = getCoverDimensions(book)
+    const cover = await resolveCover(context.storage, book)
 
     // Include series info if book is linked to a series
     let seriesInfo = null
@@ -314,6 +399,9 @@ export const getBySlug = query({
           slug: series.slug,
           sourceUrl: series.sourceUrl,
           scrapeStatus: series.scrapeStatus,
+          expectedBookCount: series.expectedBookCount,
+          discoveredBookCount: series.discoveredBookCount,
+          scrapedBookCount: series.scrapedBookCount,
         }
       }
     }
@@ -321,17 +409,23 @@ export const getBySlug = query({
     // Derive Amazon URL from edition, fallback to book field
     const amazonUrl = primaryEdition?.source === 'amazon' ? primaryEdition.sourceUrl : book.amazonUrl
 
-    return { ...book, coverUrl, coverUrlThumb, coverUrlFull, coverWidth, coverHeight, seriesInfo, amazonUrl }
+    // Join ISBNs from primary edition
+    const isbn10 = primaryEdition?.isbn10 ?? null
+    const isbn13 = primaryEdition?.isbn13 ?? null
+
+    return { ...book, cover, seriesInfo, amazonUrl, isbn10, isbn13 }
   },
 })
 
 export const getBySlugOrId = query({
   args: { slugOrId: v.string() },
   handler: async (context, args) => {
-    // Helper to get cover URLs and series info
+    // Helper to get cover, series info, linked authors, and join primary edition data
     const enrichBook = async (book: Doc<'books'>) => {
-      const { coverUrl, coverUrlThumb, coverUrlFull } = await resolveCoverUrls(context.storage, book)
-      const { coverWidth, coverHeight } = getCoverDimensions(book)
+      const cover = await resolveCover(context.storage, book)
+
+      // Join primary edition for ISBNs
+      const primaryEdition = book.primaryEditionId ? await context.db.get(book.primaryEditionId) : null
 
       let seriesInfo = null
       if (book.seriesId) {
@@ -343,11 +437,20 @@ export const getBySlugOrId = query({
             slug: series.slug,
             sourceUrl: series.sourceUrl,
             scrapeStatus: series.scrapeStatus,
+            expectedBookCount: series.expectedBookCount,
+            discoveredBookCount: series.discoveredBookCount,
+            scrapedBookCount: series.scrapedBookCount,
           }
         }
       }
 
-      return { ...book, coverUrl, coverUrlThumb, coverUrlFull, coverWidth, coverHeight, seriesInfo }
+      const linkedAuthors = await getLinkedAuthors(context.db, book._id)
+
+      // Join ISBNs from primary edition
+      const isbn10 = primaryEdition?.isbn10 ?? null
+      const isbn13 = primaryEdition?.isbn13 ?? null
+
+      return { ...book, cover, seriesInfo, linkedAuthors, isbn10, isbn13 }
     }
 
     // Try slug first

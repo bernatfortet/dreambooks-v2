@@ -14,6 +14,7 @@ const bookArgs = {
   authors: v.array(v.string()),
   // Amazon author IDs extracted from byline links - used for linking to authors table
   amazonAuthorIds: v.optional(v.array(v.string())),
+  // ISBNs accepted for lookup only (not stored on books table - exist only on editions)
   isbn10: v.optional(v.string()),
   isbn13: v.optional(v.string()),
   asin: v.optional(v.string()),
@@ -62,7 +63,8 @@ const bookArgs = {
 export const create = internalMutation({
   args: bookArgs,
   handler: async (context, args) => {
-    const { coverSourceUrl, coverSourceFormat, coverSourceAsin, formats: _formats, ...rest } = args
+    // Exclude isbn10/isbn13 (lookup only) and cover source fields
+    const { coverSourceUrl, coverSourceFormat, coverSourceAsin, formats: _formats, isbn10: _isbn10, isbn13: _isbn13, ...rest } = args
 
     const coverFromArgs = buildCoverFromSourceArgs({ coverSourceUrl, coverSourceFormat, coverSourceAsin })
     const cover = coverFromArgs ? { ...coverFromArgs } : undefined
@@ -81,7 +83,8 @@ export const create = internalMutation({
  */
 export const upsertFromScrape = internalMutation({
   args: bookArgs,
-  handler: async (context, args) => {
+  returns: v.id('books'),
+  handler: async (context, args): Promise<Id<'books'>> => {
     // Clean title: remove series names in parentheses
     const cleanedTitle = args.title?.replace(/\s*\([^)]+\)\s*$/, '').trim() || args.title
     const cleanedArgs = { ...args, title: cleanedTitle }
@@ -94,7 +97,16 @@ export const upsertFromScrape = internalMutation({
         .unique()
 
       if (existingByAsin) {
-        const { coverSourceUrl, coverSourceFormat, coverSourceAsin, formats: _formats, ...rest } = cleanedArgs
+        // Exclude isbn10/isbn13 (lookup only) and cover source fields
+        const {
+          coverSourceUrl,
+          coverSourceFormat,
+          coverSourceAsin,
+          formats: _formats,
+          isbn10: _isbn10,
+          isbn13: _isbn13,
+          ...rest
+        } = cleanedArgs
 
         const coverFromArgs = buildCoverFromSourceArgs({ coverSourceUrl, coverSourceFormat, coverSourceAsin })
         const cover = coverFromArgs ? { ...(existingByAsin.cover ?? {}), ...coverFromArgs } : undefined
@@ -118,39 +130,49 @@ export const upsertFromScrape = internalMutation({
       }
     }
 
-    // Fallback: isbn13
+    // Fallback: isbn13 via bookIdentifiers
     if (cleanedArgs.isbn13) {
-      const existingByIsbn = await context.db
-        .query('books')
-        .withIndex('by_isbn13', (q) => q.eq('isbn13', cleanedArgs.isbn13))
-        .unique()
+      const resolved: { book: Doc<'books'>; matchedBy: 'asin' | 'isbn13' | 'isbn10' } | null = await context.runQuery(
+        internal.bookIdentifiers.queries.resolveToBook,
+        {
+          isbn13: cleanedArgs.isbn13,
+        },
+      )
 
-      if (existingByIsbn) {
-        const { coverSourceUrl, coverSourceFormat, coverSourceAsin, formats: _formats, ...rest } = cleanedArgs
+      if (resolved?.book) {
+        const {
+          coverSourceUrl,
+          coverSourceFormat,
+          coverSourceAsin,
+          formats: _formats,
+          isbn10: _isbn10,
+          isbn13: _isbn13,
+          ...rest
+        } = cleanedArgs
 
         const coverFromArgs = buildCoverFromSourceArgs({ coverSourceUrl, coverSourceFormat, coverSourceAsin })
-        const cover = coverFromArgs ? { ...(existingByIsbn.cover ?? {}), ...coverFromArgs } : undefined
+        const cover = coverFromArgs ? { ...(resolved.book.cover ?? {}), ...coverFromArgs } : undefined
 
         const searchText = buildSearchText(rest)
-        await context.db.patch(existingByIsbn._id, { ...rest, ...(cover ? { cover } : {}), searchText })
-        const titleChanged = cleanedArgs.title !== existingByIsbn.title
-        const firstAuthorChanged = cleanedArgs.authors[0] !== existingByIsbn.authors[0]
-        const amazonAuthorIdChanged = cleanedArgs.amazonAuthorIds?.[0] !== existingByIsbn.amazonAuthorIds?.[0]
+        await context.db.patch(resolved.book._id, { ...rest, ...(cover ? { cover } : {}), searchText })
+        const titleChanged = cleanedArgs.title !== resolved.book.title
+        const firstAuthorChanged = cleanedArgs.authors[0] !== resolved.book.authors[0]
+        const amazonAuthorIdChanged = cleanedArgs.amazonAuthorIds?.[0] !== resolved.book.amazonAuthorIds?.[0]
         if (titleChanged || firstAuthorChanged || amazonAuthorIdChanged) {
           const slug = await generateUniqueBookSlug(
             context,
             cleanedArgs.title,
             cleanedArgs.authors,
             cleanedArgs.amazonAuthorIds,
-            existingByIsbn._id,
+            resolved.book._id,
           )
-          await context.db.patch(existingByIsbn._id, { slug })
+          await context.db.patch(resolved.book._id, { slug })
         }
-        return existingByIsbn._id
+        return resolved.book._id
       }
     }
 
-    const { coverSourceUrl, coverSourceFormat, coverSourceAsin, formats: _formats, ...rest } = cleanedArgs
+    const { coverSourceUrl, coverSourceFormat, coverSourceAsin, formats: _formats, isbn10: _isbn10, isbn13: _isbn13, ...rest } = cleanedArgs
 
     const coverFromArgs = buildCoverFromSourceArgs({ coverSourceUrl, coverSourceFormat, coverSourceAsin })
     const cover = coverFromArgs ? { ...coverFromArgs } : undefined
@@ -185,6 +207,7 @@ export const updateCover = internalMutation({
     coverStorageId: v.id('_storage'), // Medium resolution for grids
     coverStorageIdFull: v.optional(v.id('_storage')), // Full resolution for detail pages
     coverBlurHash: v.optional(v.string()),
+    coverDominantColor: v.optional(v.string()), // hex color like "#a4c2e8"
     coverStatus: v.union(v.literal('pending'), v.literal('complete'), v.literal('error')),
     // Actual measured dimensions from downloaded image
     width: v.optional(v.number()),
@@ -207,6 +230,7 @@ export const updateCover = internalMutation({
       storageIdMedium: mediumId,
       storageIdFull: fullId,
       blurHash: args.coverBlurHash ?? existingCover.blurHash,
+      dominantColor: args.coverDominantColor ?? existingCover.dominantColor,
       // Store actual measured dimensions (overwrite any scraped metadata)
       ...(args.width !== undefined && { width: args.width }),
       ...(args.height !== undefined && { height: args.height }),
@@ -469,8 +493,6 @@ export const updateFromEnrichment = mutation({
   args: {
     bookId: v.id('books'),
     subtitle: v.optional(v.string()),
-    isbn10: v.optional(v.string()),
-    isbn13: v.optional(v.string()),
     asin: v.optional(v.string()),
     amazonUrl: v.optional(v.string()),
     publisher: v.optional(v.string()),
@@ -525,8 +547,6 @@ export const updateFromEnrichment = mutation({
       title: updatedBook.title,
       subtitle: updatedBook.subtitle,
       authors: updatedBook.authors,
-      isbn10: updatedBook.isbn10,
-      isbn13: updatedBook.isbn13,
       asin: updatedBook.asin,
     })
 
@@ -673,8 +693,6 @@ export const mergeDuplicatesBySeriesPosition = internalMutation({
 
         // Keep keeper data; only fill missing identifiers/URLs
         const bestDuplicate = pickBestDataSource(duplicates)
-        if (!keeper.isbn13 && bestDuplicate?.isbn13) patch.isbn13 = bestDuplicate.isbn13
-        if (!keeper.isbn10 && bestDuplicate?.isbn10) patch.isbn10 = bestDuplicate.isbn10
         if (!keeper.asin && bestDuplicate?.asin) patch.asin = bestDuplicate.asin
         if (!keeper.amazonUrl && bestDuplicate?.amazonUrl) patch.amazonUrl = bestDuplicate.amazonUrl
 
@@ -683,8 +701,6 @@ export const mergeDuplicatesBySeriesPosition = internalMutation({
             title: keeper.title,
             subtitle: keeper.subtitle,
             authors: keeper.authors,
-            isbn10: patch.isbn10 ?? keeper.isbn10,
-            isbn13: patch.isbn13 ?? keeper.isbn13,
             asin: patch.asin ?? keeper.asin,
           })
           await context.db.patch(keeper._id, { ...patch, searchText })
@@ -744,10 +760,6 @@ function pickKeeperBook(books: BookDoc[]): BookDoc {
     const aScore = detailsStatusScore(a.detailsStatus)
     const bScore = detailsStatusScore(b.detailsStatus)
     if (aScore !== bScore) return bScore - aScore
-
-    const aHasIsbn = a.isbn13 ? 1 : 0
-    const bHasIsbn = b.isbn13 ? 1 : 0
-    if (aHasIsbn !== bHasIsbn) return bHasIsbn - aHasIsbn
 
     const aHasCover = a.cover?.storageIdMedium ? 1 : 0
     const bHasCover = b.cover?.storageIdMedium ? 1 : 0
@@ -814,8 +826,6 @@ export const backfillSearchText = internalMutation({
           title: book.title,
           subtitle: book.subtitle,
           authors: book.authors,
-          isbn10: book.isbn10,
-          isbn13: book.isbn13,
           asin: book.asin,
         })
         await context.db.patch(book._id, { searchText })

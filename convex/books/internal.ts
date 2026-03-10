@@ -4,6 +4,7 @@ import { Id } from '../_generated/dataModel'
 import { MutationCtx } from '../_generated/server'
 import { buildSearchText } from './lib/searchText'
 import { generateUniqueBookSlug } from '@/convex/lib/slug'
+import { internal } from '../_generated/api'
 
 /**
  * Shared book fields validator for create/update operations.
@@ -22,8 +23,6 @@ const bookFieldsValidator = {
       }),
     ),
   ),
-  isbn10: v.optional(v.string()),
-  isbn13: v.optional(v.string()),
   asin: v.optional(v.string()),
   amazonUrl: v.optional(v.string()),
   formats: v.optional(
@@ -60,6 +59,12 @@ const bookFieldsValidator = {
   gradeLevelMax: v.optional(v.number()),
   // DEPRECATED: Old string format, kept during migration
   gradeLevel: v.optional(v.string()),
+  // Ratings (scraped, never displayed - used only for sorting)
+  amazonRatingAverage: v.optional(v.number()),
+  amazonRatingCount: v.optional(v.number()),
+  goodreadsRatingAverage: v.optional(v.number()),
+  goodreadsRatingCount: v.optional(v.number()),
+  ratingScore: v.optional(v.number()),
   source: v.string(),
   // Scrape version - tracks which version of the scraping logic produced this data
   scrapeVersion: v.optional(v.number()),
@@ -97,8 +102,9 @@ function normalizeTitle(title: string): string {
  *
  * Deduplication order:
  * 1. ASIN (most reliable)
- * 2. ISBN-13
- * 3. Title within series (if seriesId provided)
+ * 2. Title within series (if seriesId provided)
+ *
+ * Note: ISBN lookup is handled via bookIdentifiers table (not stored on books table).
  *
  * Returns { bookId, isNew }
  */
@@ -123,7 +129,6 @@ export const createOrUpdate = internalMutation({
     console.log('🔍 Dedup check', {
       title: cleanedTitle,
       asin: args.asin ?? null,
-      isbn13: args.isbn13 ?? null,
       seriesId: args.seriesId ?? null,
     })
 
@@ -144,25 +149,6 @@ export const createOrUpdate = internalMutation({
         return { bookId: existingByAsin._id, isNew: false, coverSourceUrlChanged }
       }
       console.log('   ASIN not found:', args.asin)
-    }
-
-    // Fallback: try ISBN-13
-    if (args.isbn13) {
-      const existingByIsbn = await context.db
-        .query('books')
-        .withIndex('by_isbn13', (q) => q.eq('isbn13', args.isbn13))
-        .unique()
-
-      if (existingByIsbn) {
-        console.log('✅ Dedup matched by ISBN-13', {
-          isbn13: args.isbn13,
-          existingId: existingByIsbn._id,
-          existingTitle: existingByIsbn.title,
-        })
-        const { coverSourceUrlChanged } = await updateExistingBook(context, existingByIsbn._id, args, cleanedTitle)
-        return { bookId: existingByIsbn._id, isNew: false, coverSourceUrlChanged }
-      }
-      console.log('   ISBN-13 not found:', args.isbn13)
     }
 
     // Fallback: try title match within series
@@ -202,8 +188,6 @@ async function updateExistingBook(
     authors: string[]
     amazonAuthorIds?: string[]
     contributors?: Array<{ name: string; amazonAuthorId?: string; role: string }>
-    isbn10?: string
-    isbn13?: string
     asin?: string
     amazonUrl?: string
     formats?: Array<{ type: string; asin: string; amazonUrl: string }>
@@ -227,6 +211,11 @@ async function updateExistingBook(
     gradeLevelMin?: number
     gradeLevelMax?: number
     gradeLevel?: string
+    amazonRatingAverage?: number
+    amazonRatingCount?: number
+    goodreadsRatingAverage?: number
+    goodreadsRatingCount?: number
+    ratingScore?: number
     source: string
     scrapeVersion?: number
     detailsStatus: 'basic' | 'queued' | 'complete' | 'error'
@@ -251,8 +240,6 @@ async function updateExistingBook(
     title: cleanedTitle,
     subtitle: updatedBook.subtitle,
     authors: updatedBook.authors,
-    isbn10: updatedBook.isbn10,
-    isbn13: updatedBook.isbn13,
     asin: updatedBook.asin,
   })
 
@@ -268,8 +255,6 @@ async function updateExistingBook(
   if (args.subtitle !== undefined) updates.subtitle = args.subtitle
   if (args.amazonAuthorIds !== undefined) updates.amazonAuthorIds = args.amazonAuthorIds
   if (args.contributors !== undefined) updates.contributors = args.contributors
-  if (args.isbn10 !== undefined) updates.isbn10 = args.isbn10
-  if (args.isbn13 !== undefined) updates.isbn13 = args.isbn13
   if (args.asin !== undefined) updates.asin = args.asin
   if (args.amazonUrl !== undefined) updates.amazonUrl = args.amazonUrl
   if (args.seriesId !== undefined) updates.seriesId = args.seriesId
@@ -308,6 +293,11 @@ async function updateExistingBook(
   if (args.gradeLevelMin !== undefined) updates.gradeLevelMin = args.gradeLevelMin
   if (args.gradeLevelMax !== undefined) updates.gradeLevelMax = args.gradeLevelMax
   if (args.gradeLevel !== undefined) updates.gradeLevel = args.gradeLevel
+  if (args.amazonRatingAverage !== undefined) updates.amazonRatingAverage = args.amazonRatingAverage
+  if (args.amazonRatingCount !== undefined) updates.amazonRatingCount = args.amazonRatingCount
+  if (args.goodreadsRatingAverage !== undefined) updates.goodreadsRatingAverage = args.goodreadsRatingAverage
+  if (args.goodreadsRatingCount !== undefined) updates.goodreadsRatingCount = args.goodreadsRatingCount
+  if (args.ratingScore !== undefined) updates.ratingScore = args.ratingScore
   if (args.scrapeVersion !== undefined) updates.scrapeVersion = args.scrapeVersion
   // Only set firstSeenFromUrl/firstSeenReason if book doesn't already have them (preserve original provenance)
   if (args.firstSeenFromUrl !== undefined && !existingBook.firstSeenFromUrl) {
@@ -339,8 +329,6 @@ async function insertNewBook(
     authors: string[]
     amazonAuthorIds?: string[]
     contributors?: Array<{ name: string; amazonAuthorId?: string; role: string }>
-    isbn10?: string
-    isbn13?: string
     asin?: string
     amazonUrl?: string
     formats?: Array<{ type: string; asin: string; amazonUrl: string }>
@@ -364,6 +352,11 @@ async function insertNewBook(
     gradeLevelMin?: number
     gradeLevelMax?: number
     gradeLevel?: string
+    amazonRatingAverage?: number
+    amazonRatingCount?: number
+    goodreadsRatingAverage?: number
+    goodreadsRatingCount?: number
+    ratingScore?: number
     source: string
     scrapeVersion?: number
     detailsStatus: 'basic' | 'queued' | 'complete' | 'error'
@@ -378,8 +371,6 @@ async function insertNewBook(
     title: cleanedTitle,
     subtitle: args.subtitle,
     authors: args.authors,
-    isbn10: args.isbn10,
-    isbn13: args.isbn13,
     asin: args.asin,
   })
 
@@ -396,8 +387,6 @@ async function insertNewBook(
     ...(args.subtitle !== undefined && { subtitle: args.subtitle }),
     ...(args.amazonAuthorIds !== undefined && { amazonAuthorIds: args.amazonAuthorIds }),
     ...(args.contributors !== undefined && { contributors: args.contributors }),
-    ...(args.isbn10 !== undefined && { isbn10: args.isbn10 }),
-    ...(args.isbn13 !== undefined && { isbn13: args.isbn13 }),
     ...(args.asin !== undefined && { asin: args.asin }),
     ...(args.amazonUrl !== undefined && { amazonUrl: args.amazonUrl }),
     ...(args.seriesId !== undefined && { seriesId: args.seriesId }),
@@ -417,6 +406,11 @@ async function insertNewBook(
     ...(args.gradeLevelMin !== undefined && { gradeLevelMin: args.gradeLevelMin }),
     ...(args.gradeLevelMax !== undefined && { gradeLevelMax: args.gradeLevelMax }),
     ...(args.gradeLevel !== undefined && { gradeLevel: args.gradeLevel }),
+    ...(args.amazonRatingAverage !== undefined && { amazonRatingAverage: args.amazonRatingAverage }),
+    ...(args.amazonRatingCount !== undefined && { amazonRatingCount: args.amazonRatingCount }),
+    ...(args.goodreadsRatingAverage !== undefined && { goodreadsRatingAverage: args.goodreadsRatingAverage }),
+    ...(args.goodreadsRatingCount !== undefined && { goodreadsRatingCount: args.goodreadsRatingCount }),
+    ...(args.ratingScore !== undefined && { ratingScore: args.ratingScore }),
     ...(args.scrapeVersion !== undefined && { scrapeVersion: args.scrapeVersion }),
     ...(args.firstSeenFromUrl !== undefined && { firstSeenFromUrl: args.firstSeenFromUrl }),
     ...(args.firstSeenReason !== undefined && { firstSeenReason: args.firstSeenReason }),
@@ -494,3 +488,27 @@ function buildCoverObject(args: {
     },
   }
 }
+
+/**
+ * Backfill missing ratingScore values to 0 for existing books.
+ * Run once after deployment to ensure consistent sorting.
+ */
+export const backfillRatingScores = internalMutation({
+  args: {},
+  returns: v.object({
+    updated: v.number(),
+  }),
+  handler: async (context) => {
+    const books = await context.db.query('books').collect()
+    let updated = 0
+
+    for (const book of books) {
+      if (book.ratingScore === undefined) {
+        await context.db.patch(book._id, { ratingScore: 0 })
+        updated++
+      }
+    }
+
+    return { updated }
+  },
+})

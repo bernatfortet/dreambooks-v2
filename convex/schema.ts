@@ -113,10 +113,9 @@ export default defineSchema({
     ),
 
     // Identifiers
-    isbn10: v.optional(v.string()),
-    isbn13: v.optional(v.string()),
     asin: v.optional(v.string()),
     amazonUrl: v.optional(v.string()),
+    // Note: ISBNs are stored on bookEditions table, joined via primaryEditionId
 
     // Available formats (extracted from "See all formats" section)
     formats: v.optional(
@@ -162,6 +161,7 @@ export default defineSchema({
 
         // UX helpers
         blurHash: v.optional(v.string()),
+        dominantColor: v.optional(v.string()), // hex color like "#a4c2e8"
       }),
     ),
 
@@ -214,14 +214,21 @@ export default defineSchema({
     // Primary edition - points to the "main" bookEditions record (the one we scraped)
     // When multi-source is added, this indicates which edition provides canonical data
     primaryEditionId: v.optional(v.id('bookEditions')),
+
+    // Ratings (scraped, never displayed - used only for sorting)
+    amazonRatingAverage: v.optional(v.number()), // 0-5
+    amazonRatingCount: v.optional(v.number()), // integer
+    goodreadsRatingAverage: v.optional(v.number()), // 0-5
+    goodreadsRatingCount: v.optional(v.number()), // integer
+    ratingScore: v.optional(v.number()), // 0-5, computed blend
   })
     .index('by_detailsStatus', ['detailsStatus'])
     .index('by_coverStatus', ['coverStatus'])
     .index('by_asin', ['asin'])
-    .index('by_isbn13', ['isbn13'])
     .index('by_seriesId', ['seriesId'])
     .index('by_badScrape', ['badScrape'])
     .index('by_slug', ['slug'])
+    .index('by_ratingScore', ['ratingScore'])
     .searchIndex('search_text', {
       searchField: 'searchText',
       filterFields: [],
@@ -426,8 +433,17 @@ export default defineSchema({
     sourceUrl: v.optional(v.string()),
 
     // Image
-    imageStorageId: v.optional(v.id('_storage')),
+    image: v.optional(
+      v.object({
+        sourceImageUrl: v.optional(v.string()),
+        storageIdThumb: v.optional(v.id('_storage')), // 36px
+        storageIdMedium: v.optional(v.id('_storage')), // 150px
+        storageIdLarge: v.optional(v.id('_storage')), // 400px
+      }),
+    ),
+    // DEPRECATED: Old image fields kept for backward compatibility during migration
     imageSourceUrl: v.optional(v.string()),
+    imageStorageId: v.optional(v.id('_storage')),
 
     // Scrape version - tracks which version of the scraping logic produced this data
     scrapeVersion: v.optional(v.number()),

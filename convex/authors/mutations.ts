@@ -1,5 +1,6 @@
 import { internalMutation, mutation } from '../_generated/server'
 import { v } from 'convex/values'
+import type { Doc, Id } from '../_generated/dataModel'
 import { generateUniqueSlug } from '../lib/slug'
 import { deleteScrapeArtifacts, clearScrapeQueueReferences, deleteStorageFile } from '../lib/deleteHelpers'
 
@@ -13,8 +14,7 @@ export const upsertFromScrape = internalMutation({
     bio: v.optional(v.string()),
     amazonAuthorId: v.string(),
     sourceUrl: v.optional(v.string()),
-    imageStorageId: v.optional(v.id('_storage')),
-    imageSourceUrl: v.optional(v.string()),
+    sourceImageUrl: v.optional(v.string()),
     scrapeVersion: v.optional(v.number()),
     firstSeenFromUrl: v.optional(v.string()),
     firstSeenReason: v.optional(v.string()),
@@ -30,12 +30,10 @@ export const upsertFromScrape = internalMutation({
       .unique()
 
     if (existing) {
-      await context.db.patch(existing._id, {
+      const patch: Partial<Doc<'authors'>> = {
         name: args.name,
         bio: args.bio ?? existing.bio,
         sourceUrl: args.sourceUrl ?? existing.sourceUrl,
-        imageStorageId: args.imageStorageId ?? existing.imageStorageId,
-        imageSourceUrl: args.imageSourceUrl ?? existing.imageSourceUrl,
         ...(args.scrapeVersion !== undefined ? { scrapeVersion: args.scrapeVersion } : {}),
         // Only set firstSeenFromUrl/firstSeenReason if author doesn't already have them (preserve original provenance)
         ...(args.firstSeenFromUrl !== undefined && !existing.firstSeenFromUrl ? { firstSeenFromUrl: args.firstSeenFromUrl } : {}),
@@ -43,7 +41,17 @@ export const upsertFromScrape = internalMutation({
         scrapeStatus: 'complete',
         lastScrapedAt: Date.now(),
         errorMessage: undefined,
-      })
+        ...(args.sourceImageUrl
+          ? {
+              image: {
+                ...(existing.image ?? {}),
+                sourceImageUrl: args.sourceImageUrl,
+              },
+            }
+          : {}),
+      }
+
+      await context.db.patch(existing._id, patch)
 
       if (args.name !== existing.name) {
         const slug = await generateUniqueSlug(context, 'authors', args.name, existing._id)
@@ -60,8 +68,7 @@ export const upsertFromScrape = internalMutation({
       source: 'amazon',
       amazonAuthorId: args.amazonAuthorId,
       sourceUrl: args.sourceUrl,
-      imageStorageId: args.imageStorageId,
-      imageSourceUrl: args.imageSourceUrl,
+      ...(args.sourceImageUrl ? { image: { sourceImageUrl: args.sourceImageUrl } } : {}),
       scrapeVersion: args.scrapeVersion,
       firstSeenFromUrl: args.firstSeenFromUrl,
       firstSeenReason: args.firstSeenReason,
@@ -112,17 +119,25 @@ export const updateSlug = mutation({
 })
 
 /**
- * Update an author's image storage ID after downloading the avatar.
+ * Update an author's multi-size image after downloading all sizes.
  */
-export const updateImageStorageId = internalMutation({
+export const updateImage = internalMutation({
   args: {
     authorId: v.id('authors'),
-    imageStorageId: v.id('_storage'),
+    storageIdThumb: v.optional(v.id('_storage')),
+    storageIdMedium: v.optional(v.id('_storage')),
+    storageIdLarge: v.optional(v.id('_storage')),
+    sourceImageUrl: v.optional(v.string()),
   },
   returns: v.null(),
   handler: async (context, args) => {
     await context.db.patch(args.authorId, {
-      imageStorageId: args.imageStorageId,
+      image: {
+        sourceImageUrl: args.sourceImageUrl,
+        storageIdThumb: args.storageIdThumb,
+        storageIdMedium: args.storageIdMedium,
+        storageIdLarge: args.storageIdLarge,
+      },
     })
     return null
   },
@@ -145,8 +160,7 @@ export const clearImageData = mutation({
     }
 
     await context.db.patch(args.authorId, {
-      imageSourceUrl: undefined,
-      imageStorageId: undefined,
+      image: undefined,
     })
 
     return null
@@ -185,9 +199,16 @@ export const deleteAuthor = mutation({
       await context.db.delete(link._id)
     }
 
-    // Delete image storage file
-    if (author.imageStorageId) {
-      await deleteStorageFile(context.storage, author.imageStorageId)
+    // Delete image storage files
+    if (author.image) {
+      const storageIds = [author.image.storageIdThumb, author.image.storageIdMedium, author.image.storageIdLarge].filter(
+        Boolean,
+      ) as Id<'_storage'>[]
+
+      const uniqueStorageIds = [...new Set(storageIds)]
+      for (const storageId of uniqueStorageIds) {
+        await deleteStorageFile(context.storage, storageId)
+      }
     }
 
     // Delete scrape artifacts

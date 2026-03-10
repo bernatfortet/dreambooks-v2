@@ -15,12 +15,16 @@ export const linkByAmazonAuthorId = internalMutation({
   handler: async (context, args) => {
     let linkedCount = 0
 
+    const normalizedAuthorName = normalizePersonNameForMatch(args.authorName)
+
     // Get all books - we need to scan for matching amazonAuthorIds or author names
     const allBooks = await context.db.query('books').collect()
 
     for (const book of allBooks) {
       const hasAmazonId = book.amazonAuthorIds?.includes(args.amazonAuthorId)
-      const hasNameMatch = book.authors.some((a) => a.toLowerCase() === args.authorName.toLowerCase())
+      const hasNameMatch =
+        book.authors.some((a) => a.toLowerCase() === args.authorName.toLowerCase()) ||
+        book.authors.some((a) => normalizePersonNameForMatch(a) === normalizedAuthorName)
 
       if (hasAmazonId || hasNameMatch) {
         // Check if link already exists
@@ -33,10 +37,13 @@ export const linkByAmazonAuthorId = internalMutation({
           // Look up role from book.contributors if available
           let role: ContributorRole | undefined = undefined
           if (book.contributors) {
+            const contributorNameNormalized = normalizePersonNameForMatch(args.authorName)
             const contributor = book.contributors.find(
               (c) =>
                 (hasAmazonId && c.amazonAuthorId === args.amazonAuthorId) ||
-                (hasNameMatch && c.name.toLowerCase() === args.authorName.toLowerCase()),
+                (hasNameMatch &&
+                  (c.name.toLowerCase() === args.authorName.toLowerCase() ||
+                    normalizePersonNameForMatch(c.name) === contributorNameNormalized)),
             )
             if (contributor) {
               role = toContributorRole(contributor.role)
@@ -140,4 +147,24 @@ function toContributorRole(role: string): ContributorRole {
   if (role === 'translator') return 'translator'
   if (role === 'narrator') return 'narrator'
   return 'other'
+}
+
+function normalizePersonNameForMatch(name: string): string {
+  // Goal: robust matching across scraped bylines like "Mr. Elisha Cooper" vs canonical "Elisha Cooper".
+  const lowered = name
+    .trim()
+    .toLowerCase()
+    // Remove punctuation commonly used in honorifics and name suffixes.
+    .replace(/[.(),]/g, ' ')
+    .replace(/\s+/g, ' ')
+
+  // Strip leading honorific(s).
+  const honorifics = new Set(['mr', 'mrs', 'ms', 'miss', 'dr', 'prof', 'sir', 'madam', 'lady', 'lord'])
+  const parts = lowered.split(' ').filter(Boolean)
+
+  while (parts.length > 0 && honorifics.has(parts[0])) {
+    parts.shift()
+  }
+
+  return parts.join(' ').trim()
 }

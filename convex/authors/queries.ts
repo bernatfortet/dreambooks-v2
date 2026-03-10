@@ -3,6 +3,25 @@ import { v } from 'convex/values'
 import { Id, Doc } from '../_generated/dataModel'
 
 /**
+ * Resolve multiple image URLs from author's image storage IDs.
+ * Returns thumb (36px), medium (150px), and large (400px) URLs.
+ */
+async function resolveImageUrls(
+  storage: { getUrl: (id: Id<'_storage'>) => Promise<string | null> },
+  author: Doc<'authors'>,
+): Promise<{ imageUrl: string | null; imageUrlThumb: string | null; imageUrlLarge: string | null }> {
+  const thumbId = author.image?.storageIdThumb
+  const mediumId = author.image?.storageIdMedium
+  const largeId = author.image?.storageIdLarge
+
+  const imageUrl = mediumId ? await storage.getUrl(mediumId) : null
+  const imageUrlThumb = thumbId ? await storage.getUrl(thumbId) : imageUrl
+  const imageUrlLarge = largeId ? await storage.getUrl(largeId) : imageUrl
+
+  return { imageUrl, imageUrlThumb, imageUrlLarge }
+}
+
+/**
  * Get an author by their Amazon author ID.
  */
 export const getByAmazonId = query({
@@ -73,7 +92,9 @@ export const listWithTopBooks = query({
       _id: v.id('authors'),
       slug: v.union(v.string(), v.null()),
       name: v.string(),
+      imageUrlThumb: v.union(v.string(), v.null()),
       imageUrl: v.union(v.string(), v.null()),
+      imageUrlLarge: v.union(v.string(), v.null()),
       books: v.array(
         v.object({
           _id: v.id('books'),
@@ -89,7 +110,7 @@ export const listWithTopBooks = query({
 
     const authorsWithBooks = await Promise.all(
       allAuthors.map(async (author) => {
-        const imageUrl = author.imageStorageId ? await context.storage.getUrl(author.imageStorageId) : null
+        const { imageUrl, imageUrlThumb, imageUrlLarge } = await resolveImageUrls(context.storage, author)
 
         // Get books by this author
         const bookLinks = await context.db
@@ -119,7 +140,9 @@ export const listWithTopBooks = query({
           _id: author._id,
           slug: author.slug ?? null,
           name: author.name,
+          imageUrlThumb,
           imageUrl,
+          imageUrlLarge,
           books: books
             .filter((b): b is NonNullable<typeof b> => b !== null)
             .map((b) => ({
@@ -195,7 +218,7 @@ export const getWithDetails = query({
     const author = (await context.db.get(args.authorId)) as Doc<'authors'> | null
     if (!author) return null
 
-    const imageUrl = author.imageStorageId ? await context.storage.getUrl(author.imageStorageId) : null
+    const { imageUrl } = await resolveImageUrls(context.storage, author)
 
     const bookLinks = await context.db
       .query('bookAuthors')
@@ -272,7 +295,7 @@ export const getBySlug = query({
 
     if (!author) return null
 
-    const imageUrl = author.imageStorageId ? await context.storage.getUrl(author.imageStorageId) : null
+    const { imageUrl } = await resolveImageUrls(context.storage, author)
 
     const bookLinks = await context.db
       .query('bookAuthors')
@@ -320,7 +343,9 @@ export const getBySlugOrId = query({
       _id: v.id('authors'),
       name: v.string(),
       bio: v.union(v.string(), v.null()),
+      imageUrlThumb: v.union(v.string(), v.null()),
       imageUrl: v.union(v.string(), v.null()),
+      imageUrlLarge: v.union(v.string(), v.null()),
       sourceUrl: v.union(v.string(), v.null()),
       scrapeVersion: v.union(v.number(), v.null()),
       scrapeStatus: v.string(),
@@ -345,7 +370,7 @@ export const getBySlugOrId = query({
       .withIndex('by_slug', (q) => q.eq('slug', args.slugOrId))
       .first()
     if (bySlug) {
-      const imageUrl = bySlug.imageStorageId ? await context.storage.getUrl(bySlug.imageStorageId) : null
+      const { imageUrl, imageUrlThumb, imageUrlLarge } = await resolveImageUrls(context.storage, bySlug)
       const bookLinks = await context.db
         .query('bookAuthors')
         .withIndex('by_authorId', (q) => q.eq('authorId', bySlug._id))
@@ -369,7 +394,9 @@ export const getBySlugOrId = query({
         _id: bySlug._id,
         name: bySlug.name,
         bio: bySlug.bio ?? null,
+        imageUrlThumb,
         imageUrl,
+        imageUrlLarge,
         sourceUrl: bySlug.sourceUrl ?? null,
         scrapeVersion: bySlug.scrapeVersion ?? null,
         scrapeStatus: bySlug.scrapeStatus,
@@ -384,7 +411,7 @@ export const getBySlugOrId = query({
     try {
       const byId = (await context.db.get(args.slugOrId as Id<'authors'>)) as Doc<'authors'> | null
       if (byId) {
-        const imageUrl = byId.imageStorageId ? await context.storage.getUrl(byId.imageStorageId) : null
+        const { imageUrl, imageUrlThumb, imageUrlLarge } = await resolveImageUrls(context.storage, byId)
         const bookLinks = await context.db
           .query('bookAuthors')
           .withIndex('by_authorId', (q) => q.eq('authorId', byId._id))
@@ -408,7 +435,9 @@ export const getBySlugOrId = query({
           _id: byId._id,
           name: byId.name,
           bio: byId.bio ?? null,
+          imageUrlThumb,
           imageUrl,
+          imageUrlLarge,
           sourceUrl: byId.sourceUrl ?? null,
           scrapeVersion: byId.scrapeVersion ?? null,
           scrapeStatus: byId.scrapeStatus,
@@ -435,7 +464,7 @@ export const getInternal = internalQuery({
 })
 
 /**
- * List authors that have imageSourceUrl but no imageStorageId (for backfill).
+ * List authors that have image source URL but no image stored (for backfill).
  */
 export const listMissingAvatars = internalQuery({
   args: {
@@ -452,11 +481,11 @@ export const listMissingAvatars = internalQuery({
     const allAuthors = await context.db.query('authors').collect()
 
     const missingAvatars = allAuthors
-      .filter((author) => author.imageSourceUrl && !author.imageStorageId)
+      .filter((author) => author.image?.sourceImageUrl && !author.image?.storageIdMedium)
       .slice(0, limit)
       .map((author) => ({
         _id: author._id,
-        imageSourceUrl: author.imageSourceUrl!,
+        imageSourceUrl: author.image!.sourceImageUrl!,
       }))
 
     return missingAvatars

@@ -2,7 +2,7 @@ import { mutation, internalMutation } from '../_generated/server'
 import { v } from 'convex/values'
 import { SCRAPING_CONFIG } from '@/lib/scraping/config'
 import { SCRAPE_VERSIONS } from '../lib/scrapeVersions'
-import { extractAsin, extractAuthorId, extractSeriesId } from '@/lib/scraping/utils/amazon-url'
+import { extractAsin, extractAuthorId, extractSeriesId, normalizeAmazonUrl } from '@/lib/scraping/utils/amazon-url'
 import type { DatabaseReader } from '../_generated/server'
 
 const LEASE_DURATION_MS = SCRAPING_CONFIG.queue.leaseDurationMs
@@ -651,11 +651,12 @@ export const queueRescrape = mutation({
 /**
  * Clean URL by removing unwanted query parameters and normalizing format.
  * - Decodes HTML entities (&amp; → &)
- * - Removes: ref, ref_, binding, storeType parameters (Amazon ignores these for content)
- * - For author URLs: normalizes the slug to lowercase (Amazon ignores slug case)
+ * - Removes ref parameters from path (e.g., /ref=xxx at the end)
+ * - For author URLs: strips all query params and normalizes slug to lowercase
+ * - For series/book URLs (/dp/ASIN): strips all query params
  *
- * Author URL example: /Tim-Probert/e/B08LZGBXFT → /tim-probert/e/B08LZGBXFT
- * Series URL example: /dp/B08911B14Q?binding=paperback → /dp/B08911B14Q
+ * Author URL example: /Tim-Probert/e/B08LZGBXFT?qid=123 → /tim-probert/e/B08LZGBXFT
+ * Series URL example: /dp/B08911B14Q?binding=paperback&qid=123 → /dp/B08911B14Q
  */
 function cleanUrl(url: string, logChanges: boolean = false): string {
   try {
@@ -663,20 +664,26 @@ function cleanUrl(url: string, logChanges: boolean = false): string {
     // &amp; → &, &amp%3B → &
     let cleanedUrl = url.replace(/&amp;/g, '&').replace(/&amp%3B/g, '&')
 
+    // Some scraped hrefs can be relative (e.g. "/dp/ASIN?..."). Normalize to absolute.
+    if (cleanedUrl.startsWith('/')) {
+      cleanedUrl = `https://www.amazon.com${cleanedUrl}`
+    }
+
+    // Use shared Amazon canonicalization to avoid subtle mismatches.
+    const normalizedAmazonUrl = normalizeAmazonUrl(cleanedUrl)
+    if (normalizedAmazonUrl !== cleanedUrl) {
+      if (logChanges) {
+        console.log('🔗 URL normalized (amazon)', { original: cleanedUrl, normalized: normalizedAmazonUrl })
+      }
+      return normalizedAmazonUrl
+    }
+
     const urlObj = new URL(cleanedUrl)
 
     // Remove ref parameters from path (e.g., /ref=xxx at the end)
     urlObj.pathname = urlObj.pathname.replace(/\/ref=[^/]*$/, '')
 
-    // Remove query params that don't affect content
-    // Note: Amazon uses both "ref" and "ref_" for tracking params
-    const paramsToRemove = ['ref', 'ref_', 'binding', 'storeType']
-    for (const param of paramsToRemove) {
-      urlObj.searchParams.delete(param)
-    }
-
-    // Normalize author URL slugs to lowercase
-    // Pattern: /Slug-Name/e/AUTHORID → /slug-name/e/AUTHORID
+    // Check if this is an author URL (pattern: /slug/e/AUTHORID)
     const authorMatch = urlObj.pathname.match(/^\/([^/]+)\/e\/([A-Z0-9]+)$/i)
     if (authorMatch) {
       const originalSlug = authorMatch[1]
@@ -684,13 +691,31 @@ function cleanUrl(url: string, logChanges: boolean = false): string {
       const authorId = authorMatch[2].toUpperCase() // Keep author ID uppercase for consistency
       urlObj.pathname = `/${slug}/e/${authorId}`
 
-      // Log when slug case changed
+      // Strip all query params for author URLs - ID is in the path
+      urlObj.search = ''
+
       if (logChanges && originalSlug !== slug) {
         console.log('🔗 URL normalized (author slug)', {
           original: `/${originalSlug}/e/${authorId}`,
           normalized: `/${slug}/e/${authorId}`,
         })
       }
+
+      return urlObj.toString()
+    }
+
+    // Check if this is a /dp/ASIN URL (series or book)
+    const dpMatch = urlObj.pathname.match(/^\/dp\/([A-Z0-9]+)$/i)
+    if (dpMatch) {
+      // Strip all query params - the ASIN in the path uniquely identifies the entity
+      urlObj.search = ''
+      return urlObj.toString()
+    }
+
+    // For other URLs, only remove specific tracking params
+    const paramsToRemove = ['ref', 'ref_', 'binding', 'storeType', 'qid', 'sr']
+    for (const param of paramsToRemove) {
+      urlObj.searchParams.delete(param)
     }
 
     return urlObj.toString()
@@ -723,9 +748,11 @@ function extractEntityInfo(entityType: 'book' | 'series' | 'author', entity: Rec
     }
   }
 
+  // Author case
+  const image = entity.image as { sourceImageUrl?: string } | undefined
   return {
     url: entity.sourceUrl as string | undefined,
     displayName: entity.name as string | undefined,
-    displayImageUrl: entity.imageSourceUrl as string | undefined,
+    displayImageUrl: image?.sourceImageUrl,
   }
 }
