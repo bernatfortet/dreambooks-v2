@@ -2,15 +2,12 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useEffect, useState } from 'react'
 import { MenuIcon } from 'lucide-react'
 import { AuthButton } from '@/components/auth/AuthButton'
 import { SearchBar } from '@/components/search/SearchBar'
 import { Logo } from '@/components/core/Logo'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
-
-const DESKTOP_NAV_MIN_WIDTH = 768
 
 const NAV_ITEMS = [
   { href: '/', label: 'Books' },
@@ -21,13 +18,13 @@ const NAV_ITEMS = [
 
 export function Nav() {
   const pathname = usePathname()
-  const isDesktop = useIsDesktop()
   const isActive = (path: string) => isPathActive(pathname, path)
 
   return (
     <nav className='sticky top-0 z-50 h-[52px] border-b bg-white'>
       <div className='container mx-auto h-full px-4'>
-        {isDesktop ? <DesktopNav isActive={isActive} /> : <MobileNav isActive={isActive} />}
+        <DesktopNav isActive={isActive} />
+        <MobileNav isActive={isActive} />
       </div>
     </nav>
   )
@@ -54,7 +51,7 @@ function NavLink({ href, isActive, children }: NavLinkProps) {
 
 function DesktopNav({ isActive }: { isActive: (path: string) => boolean }) {
   return (
-    <div className='flex h-full items-center gap-6'>
+    <div className='hidden h-full items-center gap-6 md:flex'>
       <Link href='/' className='flex items-center'>
         <Logo className='h-[18px] w-auto' />
       </Link>
@@ -76,7 +73,7 @@ function DesktopNav({ isActive }: { isActive: (path: string) => boolean }) {
 
 function MobileNav({ isActive }: { isActive: (path: string) => boolean }) {
   return (
-    <div className='flex h-full items-center justify-between'>
+    <div className='flex h-full items-center justify-between md:hidden'>
       <Link href='/' className='flex items-center'>
         <Logo className='h-4 w-auto' />
       </Link>
@@ -115,25 +112,6 @@ function MobileNav({ isActive }: { isActive: (path: string) => boolean }) {
   )
 }
 
-function useIsDesktop() {
-  const [isDesktop, setIsDesktop] = useState(false)
-
-  useEffect(() => {
-    const updateIsDesktop = () => {
-      setIsDesktop(getViewportWidth() >= DESKTOP_NAV_MIN_WIDTH)
-    }
-
-    updateIsDesktop()
-    window.addEventListener('resize', updateIsDesktop)
-
-    return () => {
-      window.removeEventListener('resize', updateIsDesktop)
-    }
-  }, [])
-
-  return isDesktop
-}
-
 function isPathActive(pathname: string | null, path: string) {
   if (path === '/') return pathname === '/'
 
@@ -144,13 +122,4 @@ function getMobileNavLinkClassName(isActive: boolean) {
   return `block rounded-md px-3 py-2 text-sm font-medium transition-colors ${
     isActive ? 'bg-accent text-primary' : 'text-foreground hover:bg-accent'
   }`
-}
-
-function getViewportWidth() {
-  return Math.max(
-    window.innerWidth,
-    document.documentElement.clientWidth,
-    window.outerWidth,
-    window.visualViewport?.width ?? 0
-  )
 }
