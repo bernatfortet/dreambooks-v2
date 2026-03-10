@@ -1,6 +1,6 @@
 'use node'
 
-import { action } from '../_generated/server'
+import { action, type ActionCtx } from '../_generated/server'
 import { internal } from '../_generated/api'
 import { v } from 'convex/values'
 import { Id } from '../_generated/dataModel'
@@ -17,6 +17,50 @@ const editionDataValidator = v.object({
   coverWidth: v.optional(v.number()),
   coverHeight: v.optional(v.number()),
 })
+
+const EDITION_FORMAT_PRIORITY: Record<string, number> = {
+  hardcover: 5,
+  paperback: 4,
+  board_book: 3,
+  library_binding: 2,
+  spiral: 1,
+  kindle: 0,
+  audiobook: -1,
+  unknown: -2,
+}
+
+const bookEditionsMutations = internal['bookEditions/mutations']
+const bookIdentifiersMutations = internal['bookIdentifiers/mutations']
+const bookCoverCandidatesMutations = internal['bookCoverCandidates/mutations']
+
+type BookIdentifierType = 'asin' | 'isbn10' | 'isbn13'
+type ImportedEdition = { editionId: Id<'bookEditions'>; format: string }
+type EditionIdentifierInput = {
+  asin: string
+  amazonUrl: string
+  isbn10?: string
+  isbn13?: string
+}
+type EditionCoverInput = {
+  amazonUrl: string
+  mainCoverUrl?: string
+  coverWidth?: number
+  coverHeight?: number
+}
+type BasicBookMetadataInput = {
+  bookId: Id<'books'>
+  asin?: string
+  isbn10?: string
+  isbn13?: string
+  amazonUrl?: string
+  coverImageUrl?: string
+  coverWidth?: number
+  coverHeight?: number
+}
+type EditionImportInput = EditionIdentifierInput &
+  EditionCoverInput & {
+    format: string
+  }
 
 // Validator for scraped book data from local Playwright scraper
 const scrapedBookDataValidator = v.object({
@@ -199,91 +243,14 @@ export const importFromLocalScrape = action({
       })
     }
 
-    // Upsert editions, identifiers, and cover candidates if we have edition data
     if (args.scrapedData.editions && args.scrapedData.editions.length > 0) {
       console.log('📖 Upserting editions and identifiers...', { editionCount: args.scrapedData.editions.length })
+      const primaryEditionId = await upsertBookEditions(context, {
+        bookId,
+        editions: args.scrapedData.editions,
+        publisher: args.scrapedData.publisher,
+      })
 
-      // Upsert publisher (same for all editions currently - extracted from main page)
-      let publisherId: Id<'publishers'> | undefined
-      if (args.scrapedData.publisher) {
-        publisherId = await context.runMutation(internal.publishers.mutations.upsertByName, {
-          name: args.scrapedData.publisher,
-        })
-      }
-
-      // Track the primary edition (the first one we upsert - typically the one from the URL)
-      let primaryEditionId: Id<'bookEditions'> | undefined
-
-      for (const edition of args.scrapedData.editions) {
-        // Upsert edition
-        const editionId = await context.runMutation((internal as any).bookEditions.mutations.upsert, {
-          bookId,
-          source: 'amazon',
-          sourceId: edition.asin,
-          sourceUrl: edition.amazonUrl,
-          format: edition.format,
-          isbn10: edition.isbn10 ?? undefined,
-          isbn13: edition.isbn13 ?? undefined,
-          mainCoverUrl: edition.mainCoverUrl ?? undefined,
-          publisherId,
-        })
-
-        // First edition becomes primary
-        if (!primaryEditionId) {
-          primaryEditionId = editionId
-        }
-
-        // Upsert identifiers for this edition
-        // ASIN
-        await context.runMutation((internal as any).bookIdentifiers.mutations.upsert, {
-          bookId,
-          type: 'asin',
-          value: edition.asin,
-          editionId,
-          source: 'amazon',
-          sourceUrl: edition.amazonUrl,
-        })
-
-        // ISBN-10
-        if (edition.isbn10) {
-          await context.runMutation((internal as any).bookIdentifiers.mutations.upsert, {
-            bookId,
-            type: 'isbn10',
-            value: edition.isbn10,
-            editionId,
-            source: 'amazon',
-            sourceUrl: edition.amazonUrl,
-          })
-        }
-
-        // ISBN-13
-        if (edition.isbn13) {
-          await context.runMutation((internal as any).bookIdentifiers.mutations.upsert, {
-            bookId,
-            type: 'isbn13',
-            value: edition.isbn13,
-            editionId,
-            source: 'amazon',
-            sourceUrl: edition.amazonUrl,
-          })
-        }
-
-        // Upsert cover candidate if we have a cover URL
-        if (edition.mainCoverUrl) {
-          await context.runMutation((internal as any).bookCoverCandidates.mutations.upsert, {
-            bookId,
-            editionId,
-            imageUrl: edition.mainCoverUrl,
-            width: edition.coverWidth ?? undefined,
-            height: edition.coverHeight ?? undefined,
-            source: 'amazon',
-            sourceUrl: edition.amazonUrl,
-            isPrimary: true,
-          })
-        }
-      }
-
-      // Set primary edition on the book
       if (primaryEditionId) {
         await context.runMutation(internal.books.mutations.setPrimaryEdition, {
           bookId,
@@ -301,52 +268,179 @@ export const importFromLocalScrape = action({
 
       console.log('✅ Editions and identifiers upserted')
     } else {
-      // No edition data - still upsert basic identifiers from the main book data
-      // This ensures we always have identifier lookup even without edition scraping
-      if (args.scrapedData.asin) {
-        await context.runMutation((internal as any).bookIdentifiers.mutations.upsert, {
-          bookId,
-          type: 'asin',
-          value: args.scrapedData.asin,
-          source: 'amazon',
-          sourceUrl: args.scrapedData.amazonUrl,
-        })
-      }
-
-      if (args.scrapedData.isbn10) {
-        await context.runMutation((internal as any).bookIdentifiers.mutations.upsert, {
-          bookId,
-          type: 'isbn10',
-          value: args.scrapedData.isbn10,
-          source: 'amazon',
-          sourceUrl: args.scrapedData.amazonUrl,
-        })
-      }
-
-      if (args.scrapedData.isbn13) {
-        await context.runMutation((internal as any).bookIdentifiers.mutations.upsert, {
-          bookId,
-          type: 'isbn13',
-          value: args.scrapedData.isbn13,
-          source: 'amazon',
-          sourceUrl: args.scrapedData.amazonUrl,
-        })
-      }
-
-      // Upsert cover candidate from main cover
-      if (args.scrapedData.coverImageUrl) {
-        await context.runMutation((internal as any).bookCoverCandidates.mutations.upsert, {
-          bookId,
-          imageUrl: args.scrapedData.coverImageUrl,
-          width: args.scrapedData.coverWidth ?? undefined,
-          height: args.scrapedData.coverHeight ?? undefined,
-          source: 'amazon',
-          sourceUrl: args.scrapedData.amazonUrl,
-          isPrimary: true,
-        })
-      }
+      await upsertBasicBookMetadata(context, {
+        bookId,
+        asin: args.scrapedData.asin,
+        isbn10: args.scrapedData.isbn10,
+        isbn13: args.scrapedData.isbn13,
+        amazonUrl: args.scrapedData.amazonUrl,
+        coverImageUrl: args.scrapedData.coverImageUrl,
+        coverWidth: args.scrapedData.coverWidth,
+        coverHeight: args.scrapedData.coverHeight,
+      })
     }
 
     return { bookId, isNew }
   },
 })
+
+function pickPrimaryEditionId(
+  editions: ImportedEdition[],
+): Id<'bookEditions'> | undefined {
+  if (editions.length === 0) return undefined
+
+  const sortedEditions = [...editions].sort((left, right) => {
+    const leftPriority = EDITION_FORMAT_PRIORITY[left.format] ?? EDITION_FORMAT_PRIORITY.unknown
+    const rightPriority = EDITION_FORMAT_PRIORITY[right.format] ?? EDITION_FORMAT_PRIORITY.unknown
+    return rightPriority - leftPriority
+  })
+
+  return sortedEditions[0]?.editionId
+}
+
+async function upsertBookEditions(
+  context: ActionCtx,
+  params: {
+    bookId: Id<'books'>
+    editions: EditionImportInput[]
+    publisher?: string
+  },
+): Promise<Id<'bookEditions'> | undefined> {
+  const publisherId = await upsertPublisherIfNeeded(context, params.publisher)
+  const importedEditions: ImportedEdition[] = []
+
+  for (const edition of params.editions) {
+    const editionId = await context.runMutation(bookEditionsMutations.upsert, {
+      bookId: params.bookId,
+      source: 'amazon',
+      sourceId: edition.asin,
+      sourceUrl: edition.amazonUrl,
+      format: edition.format,
+      isbn10: edition.isbn10 ?? undefined,
+      isbn13: edition.isbn13 ?? undefined,
+      mainCoverUrl: edition.mainCoverUrl ?? undefined,
+      publisherId,
+    })
+
+    importedEditions.push({ editionId, format: edition.format })
+    await upsertEditionIdentifiers(context, params.bookId, editionId, edition)
+    await upsertEditionCoverCandidate(context, params.bookId, editionId, edition)
+  }
+
+  return pickPrimaryEditionId(importedEditions)
+}
+
+async function upsertPublisherIfNeeded(context: ActionCtx, publisher?: string): Promise<Id<'publishers'> | undefined> {
+  if (!publisher) return undefined
+
+  return await context.runMutation(internal.publishers.mutations.upsertByName, {
+    name: publisher,
+  })
+}
+
+async function upsertEditionIdentifiers(
+  context: ActionCtx,
+  bookId: Id<'books'>,
+  editionId: Id<'bookEditions'>,
+  edition: EditionIdentifierInput,
+): Promise<void> {
+  await upsertBookIdentifier(context, {
+    bookId,
+    type: 'asin',
+    value: edition.asin,
+    sourceUrl: edition.amazonUrl,
+    editionId,
+  })
+  await upsertBookIdentifier(context, {
+    bookId,
+    type: 'isbn10',
+    value: edition.isbn10,
+    sourceUrl: edition.amazonUrl,
+    editionId,
+  })
+  await upsertBookIdentifier(context, {
+    bookId,
+    type: 'isbn13',
+    value: edition.isbn13,
+    sourceUrl: edition.amazonUrl,
+    editionId,
+  })
+}
+
+async function upsertEditionCoverCandidate(
+  context: ActionCtx,
+  bookId: Id<'books'>,
+  editionId: Id<'bookEditions'>,
+  edition: EditionCoverInput,
+): Promise<void> {
+  if (!edition.mainCoverUrl) return
+
+  await context.runMutation(bookCoverCandidatesMutations.upsert, {
+    bookId,
+    editionId,
+    imageUrl: edition.mainCoverUrl,
+    width: edition.coverWidth ?? undefined,
+    height: edition.coverHeight ?? undefined,
+    source: 'amazon',
+    sourceUrl: edition.amazonUrl,
+    isPrimary: true,
+  })
+}
+
+async function upsertBasicBookMetadata(
+  context: ActionCtx,
+  params: BasicBookMetadataInput,
+): Promise<void> {
+  await upsertBookIdentifier(context, {
+    bookId: params.bookId,
+    type: 'asin',
+    value: params.asin,
+    sourceUrl: params.amazonUrl,
+  })
+  await upsertBookIdentifier(context, {
+    bookId: params.bookId,
+    type: 'isbn10',
+    value: params.isbn10,
+    sourceUrl: params.amazonUrl,
+  })
+  await upsertBookIdentifier(context, {
+    bookId: params.bookId,
+    type: 'isbn13',
+    value: params.isbn13,
+    sourceUrl: params.amazonUrl,
+  })
+
+  if (!params.coverImageUrl) return
+
+  await context.runMutation(bookCoverCandidatesMutations.upsert, {
+    bookId: params.bookId,
+    imageUrl: params.coverImageUrl,
+    width: params.coverWidth ?? undefined,
+    height: params.coverHeight ?? undefined,
+    source: 'amazon',
+    sourceUrl: params.amazonUrl,
+    isPrimary: true,
+  })
+}
+
+async function upsertBookIdentifier(
+  context: ActionCtx,
+  params: {
+    bookId: Id<'books'>
+    type: BookIdentifierType
+    value: string | undefined
+    sourceUrl: string | undefined
+    editionId?: Id<'bookEditions'>
+  },
+): Promise<void> {
+  if (!params.value || !params.sourceUrl) return
+
+  await context.runMutation(bookIdentifiersMutations.upsert, {
+    bookId: params.bookId,
+    type: params.type,
+    value: params.value,
+    editionId: params.editionId,
+    source: 'amazon',
+    sourceUrl: params.sourceUrl,
+  })
+}

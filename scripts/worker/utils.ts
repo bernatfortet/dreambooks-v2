@@ -182,9 +182,18 @@ export function isJuvenileBook(bookData: {
 }): boolean {
   const hasAgeRange = bookData.ageRangeMin != null || bookData.ageRangeMax != null
   const hasGradeLevel = bookData.gradeLevelMin != null || bookData.gradeLevelMax != null
-  const hasChildrensCategory = bookData.categories?.some(
-    (category) => category.toLowerCase().includes("children's books") || category.toLowerCase().includes("children's books"),
-  )
+  const hasChildrensCategory = bookData.categories?.some((category) => category.toLowerCase().includes("children's books"))
 
   return hasAgeRange || hasGradeLevel || hasChildrensCategory === true
+}
+
+/**
+ * Check if a book is explicitly marked as English on Amazon.
+ * Returns false when language is missing so discovery imports stay conservative.
+ */
+export function isEnglishBook(bookData: { language?: string | null }): boolean {
+  const language = bookData.language?.trim().toLowerCase()
+  if (!language) return false
+
+  return language === 'english'
 }

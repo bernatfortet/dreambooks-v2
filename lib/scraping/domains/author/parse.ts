@@ -1,5 +1,10 @@
 import type { Page } from 'playwright'
 import { AuthorData, AuthorSeriesEntry, AuthorBookEntry } from './types'
+import { isAudioFormat } from '../book/types'
+
+type AuthorBookCandidate = AuthorBookEntry & {
+  format: string | null
+}
 
 /**
  * Parse author data from an Amazon author page using Playwright.
@@ -11,9 +16,9 @@ export async function parseAuthorFromPage(page: Page): Promise<AuthorData> {
   const amazonAuthorId = extractAmazonAuthorIdFromUrl(page.url())
   const name = await extractAuthorName(page)
   const imageUrl = await extractProfileImage(page)
-  const bio = await extractBio(page)
   const series = await extractSeries(page)
   const books = await extractBooks(page)
+  const bio = await extractBio(page)
 
   const authorData: AuthorData = {
     name,
@@ -296,98 +301,109 @@ async function extractSeries(page: Page): Promise<AuthorSeriesEntry[]> {
 
 async function extractBooks(page: Page): Promise<AuthorBookEntry[]> {
   console.log('   🔍 Looking for books...')
-  const books: AuthorBookEntry[] = []
-  const seenAsins = new Set<string>()
 
-  // Find book items
-  const bookSelectors = ['[data-asin]:has(a[href*="/dp/"])', '.a-carousel-card:has(a[href*="/dp/"])', 'a[href*="/dp/"][data-asin]']
+  const rawBooks = await extractBookCandidates(page)
+  const bestBookByAsin = new Map<string, AuthorBookCandidate & { score: number }>()
 
-  for (const selector of bookSelectors) {
-    try {
-      const elements = await page.locator(selector).all()
+  for (const book of rawBooks) {
+    if (!book.asin || !book.amazonUrl) continue
+    if (!isLikelyBookTitle(book.title)) continue
+    if (isAudioFormat(book.format)) continue
 
-      for (const element of elements.slice(0, 30)) {
-        try {
-          // Get ASIN
-          let asin = await element.getAttribute('data-asin')
-          if (!asin) {
-            const href = await element.getAttribute('href')
-            if (href) {
-              const match = href.match(/\/dp\/([A-Z0-9]{10})/)
-              asin = match?.[1] ?? null
-            }
-          }
+    const scoredBook = {
+      ...book,
+      score: getBookCandidateScore(book),
+    }
 
-          if (!asin || seenAsins.has(asin)) continue
-          seenAsins.add(asin)
-
-          // Get title from title attribute or link text
-          const titleLink = element.locator('a[href*="/dp/"]').first()
-          let title = await titleLink.getAttribute('title').catch(() => null)
-          if (!title) {
-            title = await titleLink.textContent().catch(() => null)
-          }
-
-          // Get cover image
-          const img = element.locator('img').first()
-          let coverImageUrl: string | null = null
-          const imgSrc = await img.getAttribute('src').catch(() => null)
-          if (imgSrc && !imgSrc.includes('data:')) {
-            coverImageUrl = upgradeImageUrl(imgSrc)
-          }
-
-          // Build URL
-          const amazonUrl = `https://www.amazon.com/dp/${asin}`
-
-          books.push({
-            title: title?.trim() ?? null,
-            asin,
-            amazonUrl,
-            coverImageUrl,
-          })
-        } catch {
-          continue
-        }
-      }
-    } catch {
-      continue
+    const existing = bestBookByAsin.get(book.asin)
+    if (!existing || scoredBook.score > existing.score) {
+      bestBookByAsin.set(book.asin, scoredBook)
     }
   }
 
-  // Fallback: find all /dp/ links if no structured elements found
-  if (books.length === 0) {
-    try {
-      const links = await page.locator('a[href*="/dp/"]').all()
-
-      for (const link of links.slice(0, 30)) {
-        try {
-          const href = await link.getAttribute('href')
-          if (!href) continue
-
-          const match = href.match(/\/dp\/([A-Z0-9]{10})/)
-          const asin = match?.[1]
-          if (!asin || seenAsins.has(asin)) continue
-          seenAsins.add(asin)
-
-          const title = (await link.getAttribute('title')) ?? (await link.textContent())
-
-          books.push({
-            title: title?.trim() ?? null,
-            asin,
-            amazonUrl: `https://www.amazon.com/dp/${asin}`,
-            coverImageUrl: null,
-          })
-        } catch {
-          continue
-        }
-      }
-    } catch {
-      // Ignore
-    }
-  }
+  const books: AuthorBookEntry[] = Array.from(bestBookByAsin.values()).map((book) => ({
+    title: book.title,
+    asin: book.asin,
+    amazonUrl: book.amazonUrl,
+    coverImageUrl: book.coverImageUrl ? upgradeImageUrl(book.coverImageUrl) : null,
+  }))
 
   console.log(`   Found ${books.length} books`)
   return books
+}
+
+async function extractBookCandidates(page: Page): Promise<AuthorBookCandidate[]> {
+  try {
+    return await page.evaluate(() => {
+      return Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="/dp/"], a[href*="/gp/product/"]'))
+        .map((anchor) => {
+          const href = anchor.getAttribute('href')
+          const asin = href?.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i)?.[1]?.toUpperCase() ?? null
+          const title = (anchor.getAttribute('title') || anchor.getAttribute('aria-label') || anchor.textContent || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+
+          const cardRoot =
+            anchor.closest('[data-testid], .a-carousel-card, .a-section, li, article, div') ??
+            anchor.parentElement ??
+            anchor
+          const image =
+            anchor.querySelector<HTMLImageElement>('img[src]') ??
+            cardRoot.querySelector<HTMLImageElement>('img[src]')
+          const imageUrl = image?.getAttribute('src')
+          const contextText = (cardRoot.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase()
+          const combinedText = [title, anchor.getAttribute('aria-label') || '', contextText].join(' ').toLowerCase()
+
+          return {
+            title: title || null,
+            asin,
+            amazonUrl: asin ? `https://www.amazon.com/dp/${asin}` : null,
+            coverImageUrl: imageUrl && !imageUrl.startsWith('data:') ? imageUrl : null,
+            format: detectCandidateFormat(combinedText),
+          }
+        })
+        .filter((book) => book.asin && book.title)
+    })
+  } catch {
+    return []
+  }
+}
+
+function isLikelyBookTitle(title: string | null): title is string {
+  if (!title) return false
+
+  const cleaned = title.trim()
+  if (!cleaned) return false
+  if (/^(hardcover|paperback|audiobook|audio cd|school & library binding|preloaded digital audio player|see all)$/i.test(cleaned)) {
+    return false
+  }
+  if (/^book\s+\d+\s+of\s+\d+:/i.test(cleaned)) return false
+  if (/^part of:/i.test(cleaned)) return false
+  if (/^quick look/i.test(cleaned)) return false
+
+  return true
+}
+
+function getBookCandidateScore(book: AuthorBookEntry): number {
+  let score = 0
+
+  if (book.title && !/^book \d+ of \d+/i.test(book.title)) score += 4
+  if (book.title && !/^part of:/i.test(book.title)) score += 2
+  if (book.title && book.title.length > 6) score += 1
+  if (book.coverImageUrl) score += 1
+
+  return score
+}
+
+function detectCandidateFormat(text: string): string | null {
+  if (text.includes('audiobook') || text.includes('audible') || text.includes('audio cd')) {
+    return 'audiobook'
+  }
+  if (text.includes('hardcover')) return 'hardcover'
+  if (text.includes('paperback')) return 'paperback'
+  if (text.includes('kindle')) return 'kindle'
+
+  return null
 }
 
 // --- Utility helpers ---

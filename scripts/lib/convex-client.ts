@@ -1,6 +1,7 @@
 import { ConvexHttpClient } from 'convex/browser'
 import { api } from '@/convex/_generated/api'
-import { BookData } from '@/lib/scraping'
+import type { BookData } from '@/lib/scraping/domains/book/types'
+import { FORMAT_PRIORITY, isAudioFormat } from '@/lib/scraping/domains/book/types'
 
 type ImportResult = {
   bookId: string
@@ -41,6 +42,8 @@ export async function importBookToConvex(params: {
   }
 
   // Transform null values to undefined (Convex validators don't accept null)
+  const canonicalAmazonUrl = getCanonicalAmazonUrl(scrapedData, amazonUrl)
+
   const cleanedData = {
     title: scrapedData.title,
     authors: scrapedData.authors,
@@ -55,7 +58,7 @@ export async function importBookToConvex(params: {
     isbn10: scrapedData.isbn10 ?? undefined,
     isbn13: scrapedData.isbn13 ?? undefined,
     asin: scrapedData.asin ?? undefined,
-    amazonUrl,
+    amazonUrl: canonicalAmazonUrl,
     publisher: scrapedData.publisher ?? undefined,
     publishedDate: scrapedData.publishedDate ?? undefined,
     pageCount: scrapedData.pageCount ?? undefined,
@@ -108,3 +111,27 @@ export async function importBookToConvex(params: {
 
   return result
 }
+
+function getCanonicalAmazonUrl(scrapedData: BookData, fallbackUrl: string): string {
+  const canonicalFormat = pickCanonicalFormat(scrapedData)
+  if (canonicalFormat?.amazonUrl) return canonicalFormat.amazonUrl
+  if (scrapedData.asin) return `https://www.amazon.com/dp/${scrapedData.asin}`
+  return fallbackUrl
+}
+
+function pickCanonicalFormat(scrapedData: BookData) {
+  const formats = scrapedData.formats.filter((format) => !isAudioFormat(format.type))
+  if (formats.length === 0) return null
+
+  if (scrapedData.asin) {
+    const canonicalByAsin = formats.find((format) => format.asin === scrapedData.asin)
+    if (canonicalByAsin) return canonicalByAsin
+  }
+
+  return [...formats].sort((left, right) => {
+    const leftPriority = FORMAT_PRIORITY[left.type] ?? 0
+    const rightPriority = FORMAT_PRIORITY[right.type] ?? 0
+    return rightPriority - leftPriority
+  })[0]
+}
+

@@ -17,6 +17,11 @@ export const COVER_FORMAT_PRIORITY: Record<string, number> = {
   unknown: 0,
 }
 
+export function isAudioFormat(format: string | null | undefined): boolean {
+  if (!format) return false
+  return format.toLowerCase() === 'audiobook'
+}
+
 export type BookFormat = {
   type: string // 'hardcover', 'paperback', 'kindle', 'audiobook', etc.
   asin: string
@@ -59,6 +64,7 @@ export type BookData = {
   asin: string | null
   publisher: string | null
   publishedDate: string | null
+  language: string | null
   pageCount: number | null
   description: string | null
   coverImageUrl: string | null

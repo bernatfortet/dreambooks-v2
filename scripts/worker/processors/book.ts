@@ -1,9 +1,11 @@
 import type { Page } from 'playwright'
+import { type BookData, isAudioFormat } from '@/lib/scraping/domains/book/types'
 import { parseBookFromPage } from '@/lib/scraping/domains/book/parse'
 import { discoverBookLinks } from '@/lib/scraping/domains/book/discover'
+import { extractAuthorId } from '@/lib/scraping/utils/amazon-url'
 import { detectAmazonPageType } from '@/lib/scraping/utils/page-type-detector'
 import { navigateWithRetry } from '../browser'
-import { truncate, incrementScrapingCount, log, isJuvenileBook } from '../utils'
+import { truncate, incrementScrapingCount, log, isJuvenileBook, isEnglishBook } from '../utils'
 import { importBookToConvex } from '../../lib/convex-client'
 import {
   getConvexClient,
@@ -84,18 +86,16 @@ export async function processBookFromQueue(params: { item: QueueItem; page: Page
     })
   }
 
-  // Only enforce juvenile filter for discoveries.
-  // Manual user enqueues should be allowed even when Amazon lacks juvenile signals.
-  if (item.source === 'discovery' && !isJuvenileBook(bookData)) {
-    log(`   ⏭️ Skipping non-juvenile book (no age/grade/children's category)`)
+  const discoveryRejection = getDiscoveryRejectionReason(item, bookData)
+  if (discoveryRejection) {
+    log(`   ⏭️ ${discoveryRejection.logMessage}`)
     if (!dryRun) {
-      await markQueueItemError(item._id, "Non-juvenile book (no age/grade/children's category)")
+      await markQueueItemError(item._id, discoveryRejection.errorMessage)
     }
     return { success: false }
   }
-  if (item.source === 'user' && !isJuvenileBook(bookData)) {
-    log(`   ⚠️ No juvenile signals (age/grade/children's category), but importing (manual enqueue)`)
-  }
+
+  logManualImportWarnings(item, bookData)
 
   if (dryRun) {
     log(`   🏁 Would import (dry run)`)
@@ -129,8 +129,7 @@ export async function processBookFromQueue(params: { item: QueueItem; page: Page
     return { success: false }
   }
 
-  // Extract discoveries and queue them (respecting skip options)
-  let discoveries = discoverBookLinks(bookData)
+  let discoveries = getBookDiscoveries(item, bookData)
 
   // Filter discoveries based on skip options
   if (item.skipSeriesLink) {
@@ -152,6 +151,8 @@ export async function processBookFromQueue(params: { item: QueueItem; page: Page
       const queued = await queueDiscoveries(discoveries, item.url)
       log(`   ✅ Queued ${queued} discoveries`)
     }
+  } else if (isAuthorPageDiscovery(item)) {
+    log(`   ⏭️ Skipping downstream discovery for author-page book`)
   }
 
   // Mark queue item complete
@@ -167,3 +168,76 @@ export async function processBookFromQueue(params: { item: QueueItem; page: Page
 
   return { success: true, bookId }
 }
+
+function getDiscoveryRejectionReason(
+  item: QueueItem,
+  bookData: Pick<BookData, 'language' | 'formats' | 'amazonAuthorIds'>,
+): { logMessage: string; errorMessage: string } | null {
+  if (item.source !== 'discovery') return null
+
+  if (!isJuvenileBook(bookData)) {
+    return {
+      logMessage: "Skipping non-juvenile book (no age/grade/children's category)",
+      errorMessage: "Non-juvenile book (no age/grade/children's category)",
+    }
+  }
+
+  if (!isEnglishBook(bookData)) {
+    const language = bookData.language ?? 'unknown'
+    return {
+      logMessage: `Skipping non-English book (language: ${language})`,
+      errorMessage: `Non-English book (language: ${language})`,
+    }
+  }
+
+  if (isAudiobookOnlyDiscovery(bookData.formats)) {
+    return {
+      logMessage: 'Skipping audiobook-only discovery',
+      errorMessage: 'Audiobook-only discovery',
+    }
+  }
+
+  if (isAuthorPageDiscovery(item) && !matchesDiscoveryAuthor(item.referrerUrl, bookData.amazonAuthorIds)) {
+    return {
+      logMessage: 'Skipping book that does not match source author',
+      errorMessage: 'Book does not match source author',
+    }
+  }
+
+  return null
+}
+
+function logManualImportWarnings(item: QueueItem, bookData: Pick<BookData, 'language'>): void {
+  if (item.source !== 'user') return
+
+  if (!isJuvenileBook(bookData)) {
+    log(`   ⚠️ No juvenile signals (age/grade/children's category), but importing (manual enqueue)`)
+  }
+
+  if (!isEnglishBook(bookData)) {
+    log(`   ⚠️ Language is not explicitly English (${bookData.language ?? 'unknown'}), but importing (manual enqueue)`)
+  }
+}
+
+function getBookDiscoveries(item: QueueItem, bookData: BookData) {
+  if (isAuthorPageDiscovery(item)) return []
+  return discoverBookLinks(bookData)
+}
+
+function isAuthorPageDiscovery(item: QueueItem): boolean {
+  return item.source === 'discovery' && item.referrerReason === 'author-page' && Boolean(item.referrerUrl)
+}
+
+function matchesDiscoveryAuthor(referrerUrl: string | undefined, amazonAuthorIds: string[] | undefined): boolean {
+  const sourceAuthorId = referrerUrl ? extractAuthorId(referrerUrl) : null
+  if (!sourceAuthorId) return true
+  if (!amazonAuthorIds?.length) return false
+
+  return amazonAuthorIds.includes(sourceAuthorId)
+}
+
+function isAudiobookOnlyDiscovery(formats: Array<{ type: string }> | undefined): boolean {
+  if (!formats?.length) return false
+  return formats.every((format) => isAudioFormat(format.type))
+}
+
