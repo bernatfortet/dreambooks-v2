@@ -18,6 +18,7 @@ type BookMasonryCardProps = {
   dominantColor?: string | null
   seriesPosition?: number | null
   badge?: ReactNode
+  titleMarker?: ReactNode
   canManageBooks?: boolean
   style: React.CSSProperties
   imageHeight: number
@@ -34,6 +35,7 @@ export function BookMasonryCard({
   dominantColor,
   seriesPosition,
   badge,
+  titleMarker,
   canManageBooks = false,
   style,
   imageHeight,
@@ -51,6 +53,7 @@ export function BookMasonryCard({
       coverUrl={coverUrl}
       dominantColor={dominantColor}
       badge={displayBadge}
+      titleMarker={titleMarker}
       style={style}
       imageHeight={imageHeight}
       priority={priority}
@@ -88,6 +91,7 @@ type BookMasonryLinkProps = {
   coverUrl: string | null
   dominantColor?: string | null
   badge?: ReactNode
+  titleMarker?: ReactNode
   style: React.CSSProperties
   imageHeight: number
   priority: boolean
@@ -103,6 +107,7 @@ function BookMasonryLink({
   coverUrl,
   dominantColor,
   badge,
+  titleMarker,
   style,
   imageHeight,
   priority,
@@ -150,7 +155,10 @@ function BookMasonryLink({
         {badge}
       </div>
 
-      <h3 className='font-medium text-[14px] line-clamp-2 group-hover:text-primary transition-colors'>{title}</h3>
+      <h3 className='font-medium text-[14px] line-clamp-2 group-hover:text-primary transition-colors'>
+        {titleMarker}
+        {title}
+      </h3>
 
       {authors.length > 0 ? <p className='text-[13px] text-muted-foreground line-clamp-1'>{authors.join(', ')}</p> : null}
     </Link>

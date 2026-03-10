@@ -39,6 +39,7 @@ export type BookMasonryItem = {
   dominantColor?: string | null
   seriesPosition?: number | null
   badge?: ReactNode
+  titleMarker?: ReactNode
 }
 
 type MeasuredDimensions = {
@@ -129,6 +130,7 @@ export function BookMasonryList({ books, className }: BookMasonryListProps) {
             dominantColor={book.dominantColor}
             seriesPosition={book.seriesPosition}
             badge={book.badge}
+            titleMarker={book.titleMarker}
             canManageBooks={canManageBooks}
             style={{
               position: 'absolute',

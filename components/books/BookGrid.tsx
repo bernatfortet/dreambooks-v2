@@ -22,6 +22,7 @@ type BookItem = {
   dominantColor?: string | null
   seriesPosition?: number | null
   badge?: ReactNode
+  titleMarker?: ReactNode
 }
 
 const BOOK_GRID_CLASSES = 'grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3'
@@ -87,5 +88,6 @@ function normalizeBookForMasonry(book: BookItem): BookMasonryItem {
     dominantColor: book.cover?.dominantColor ?? book.dominantColor ?? null,
     seriesPosition: book.seriesPosition,
     badge: book.badge,
+    titleMarker: book.titleMarker,
   }
 }

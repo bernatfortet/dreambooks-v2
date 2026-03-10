@@ -8,7 +8,7 @@ import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
 import { BookGridList, BookGridSkeleton } from '@/components/books/BookGrid'
 import { DataDebugPanel } from '@/components/ui/DataDebugPanel'
-import { BookCardBadge } from '@/components/books/BookCard'
+import { AwardHonorMarker, AwardWinnerMarker } from '@/components/awards/AwardResultMarker'
 import { PageContainer } from '@/components/ui/PageContainer'
 
 type AwardPageProps = {
@@ -17,6 +17,10 @@ type AwardPageProps = {
 
 type AwardPageData = NonNullable<FunctionReturnType<typeof api.awards.queries.getWithBooksBySlug>>
 type AwardBook = AwardPageData['books'][number]
+type AwardBookGroup = {
+  year: number | null
+  books: AwardBook[]
+}
 
 export default function AwardPage({ params }: AwardPageProps) {
   const { slug } = use(params)
@@ -58,9 +62,7 @@ export default function AwardPage({ params }: AwardPageProps) {
 
             {award.description && <p className='text-muted-foreground mt-2 max-w-2xl'>{award.description}</p>}
 
-            <p className='text-sm text-muted-foreground mt-2'>
-              {award.books.length} {award.books.length === 1 ? 'book' : 'books'}
-            </p>
+            <p className='text-sm text-muted-foreground mt-2'>{formatBookCountLabel(award.books.length)}</p>
           </div>
         </div>
       </div>
@@ -68,12 +70,11 @@ export default function AwardPage({ params }: AwardPageProps) {
       {award.books.length === 0 ? (
         <p className='text-muted-foreground'>No books have won this award yet.</p>
       ) : (
-        <BookGridList
-          books={award.books.map((book: AwardBook) => ({
-            ...book,
-            badge: formatAwardBadge(book.year, book.category),
-          }))}
-        />
+        <div className='space-y-4'>
+          {groupAwardBooksByYear(award.books).map((group) => (
+            <AwardYearSection key={group.year ?? 'unknown'} group={group} />
+          ))}
+        </div>
       )}
 
       <DataDebugPanel data={award} label='Award Data' />
@@ -81,14 +82,69 @@ export default function AwardPage({ params }: AwardPageProps) {
   )
 }
 
-function formatAwardBadge(year?: number | null, category?: string | null) {
-  if (!year && !category) return undefined
+function AwardYearSection({ group }: { group: AwardBookGroup }) {
+  return (
+    <section className='space-y-4'>
+      <div className='flex items-center gap-3'>
+        <h2 className='text-2xl font-semibold'>{group.year ?? 'Other'}</h2>
+        <p className='text-sm text-muted-foreground'>{formatBookCountLabel(group.books.length)}</p>
+      </div>
 
-  const parts = []
-  if (year) parts.push(year)
-  if (category) parts.push(category)
+      <BookGridList
+        books={buildAwardDisplayBooks(group.books)}
+      />
+    </section>
+  )
+}
 
-  return <BookCardBadge>{parts.join(' • ')}</BookCardBadge>
+function getAwardTitleMarker(category?: string | null) {
+  if (category === 'Winner') {
+    return <AwardWinnerMarker />
+  }
+
+  if (category === 'Honor Book') {
+    return <AwardHonorMarker />
+  }
+
+  return undefined
+}
+
+function groupAwardBooksByYear(books: AwardBook[]): AwardBookGroup[] {
+  const booksByYear = new Map<number | null, AwardBook[]>()
+
+  for (const book of books) {
+    const year = book.year ?? null
+    const yearBooks = booksByYear.get(year)
+
+    if (yearBooks) {
+      yearBooks.push(book)
+      continue
+    }
+
+    booksByYear.set(year, [book])
+  }
+
+  return [...booksByYear.entries()]
+    .sort(([leftYear], [rightYear]) => {
+      if (leftYear === null) return 1
+      if (rightYear === null) return -1
+      return rightYear - leftYear
+    })
+    .map(([year, yearBooks]) => ({
+      year,
+      books: yearBooks,
+    }))
+}
+
+function buildAwardDisplayBooks(books: AwardBook[]) {
+  return books.map((book) => ({
+    ...book,
+    titleMarker: getAwardTitleMarker(book.category),
+  }))
+}
+
+function formatBookCountLabel(count: number) {
+  return `${count} ${count === 1 ? 'book' : 'books'}`
 }
 
 function AwardDetailSkeleton() {
