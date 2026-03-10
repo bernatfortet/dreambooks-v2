@@ -1,13 +1,17 @@
 'use client'
 
 import { useQuery } from 'convex/react'
+import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import Link from 'next/link'
 
+type SeriesListData = NonNullable<FunctionReturnType<typeof api.series.queries.list>>
+type SeriesListItem = SeriesListData[number]
+
 export function SeriesList() {
-  const seriesList = useQuery(api.series.queries.list)
+  const seriesList: SeriesListData | undefined = useQuery(api.series.queries.list)
 
   if (seriesList === undefined) {
     return <p className='text-muted-foreground'>Loading series...</p>
@@ -28,7 +32,7 @@ export function SeriesList() {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {seriesList.map((series: (typeof seriesList)[number]) => (
+        {seriesList.map((series: SeriesListItem) => (
           <TableRow key={series._id}>
             <TableCell>
               <Link href={`/series/${series.slug ?? series._id}`} className='text-blue-500 hover:underline font-medium'>

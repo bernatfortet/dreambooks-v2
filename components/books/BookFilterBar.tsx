@@ -1,13 +1,21 @@
 'use client'
 
+import type { FunctionReturnType } from 'convex/server'
 import { ChevronDownIcon, XIcon } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Label } from '@/components/ui/label'
+import { api } from '@/convex/_generated/api'
 import type { BookFilters } from './filters/types'
 import { useBookFiltersData } from './filters/useBookFiltersData'
+
+type AwardListData = NonNullable<FunctionReturnType<typeof api.awards.queries.list>>
+type AwardListItem = AwardListData[number]
+type FilterOptions = NonNullable<FunctionReturnType<typeof api.books.queries.getFilterOptions>>
+type AgeRangeBucket = FilterOptions['ageRangeBuckets'][number]
+type GradeLevelBucket = FilterOptions['gradeLevelBuckets'][number]
 
 type BookFilterBarProps = {
   filters: BookFilters
@@ -40,7 +48,7 @@ export function BookFilterBar({ filters, onFiltersChange }: BookFilterBarProps) 
             ) : !filterOptions?.ageRangeBuckets?.length ? (
               <p className='text-sm text-muted-foreground'>No age range data</p>
             ) : (
-              filterOptions.ageRangeBuckets.map((bucket) => (
+              filterOptions.ageRangeBuckets.map((bucket: AgeRangeBucket) => (
                 <CheckboxItem
                   key={bucket.id}
                   id={`age-${bucket.id}`}
@@ -60,7 +68,7 @@ export function BookFilterBar({ filters, onFiltersChange }: BookFilterBarProps) 
             ) : !filterOptions?.gradeLevelBuckets?.length ? (
               <p className='text-sm text-muted-foreground'>No grade level data</p>
             ) : (
-              filterOptions.gradeLevelBuckets.map((bucket) => (
+              filterOptions.gradeLevelBuckets.map((bucket: GradeLevelBucket) => (
                 <CheckboxItem
                   key={bucket.id}
                   id={`grade-${bucket.id}`}
@@ -80,7 +88,7 @@ export function BookFilterBar({ filters, onFiltersChange }: BookFilterBarProps) 
             ) : !awards?.length ? (
               <p className='text-sm text-muted-foreground'>No awards available</p>
             ) : (
-              awards.map((award) => (
+              awards.map((award: AwardListItem) => (
                 <CheckboxItem
                   key={award._id}
                   id={`award-${award._id}`}

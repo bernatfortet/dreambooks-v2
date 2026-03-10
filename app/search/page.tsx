@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useQuery } from 'convex/react'
 import type { FunctionReturnType } from 'convex/server'
@@ -16,6 +16,14 @@ type SearchSeries = SearchResults['series'][number]
 type SearchAuthor = SearchResults['authors'][number]
 
 export default function SearchPage() {
+  return (
+    <Suspense fallback={<SearchPageFallback />}>
+      <SearchPageContent />
+    </Suspense>
+  )
+}
+
+function SearchPageContent() {
   const searchParams = useSearchParams()
   const query = searchParams.get('q') ?? ''
   const [activeTab, setActiveTab] = useState<'all' | 'books' | 'series' | 'authors'>('all')
@@ -112,6 +120,15 @@ export default function SearchPage() {
           )}
         </div>
       )}
+    </PageContainer>
+  )
+}
+
+function SearchPageFallback() {
+  return (
+    <PageContainer>
+      <h1 className='text-3xl font-bold mb-6'>Search</h1>
+      <SearchResultsSkeleton />
     </PageContainer>
   )
 }
