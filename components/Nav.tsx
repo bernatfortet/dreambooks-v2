@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Button } from '@/components/ui/button'
+import { AuthButton } from '@/components/auth/AuthButton'
 import { SearchBar } from '@/components/search/SearchBar'
 import { Logo } from '@/components/core/Logo'
 
@@ -41,9 +41,7 @@ export function Nav() {
             <SearchBar />
           </div>
 
-          <Button variant='outline' size='sm'>
-            Sign in
-          </Button>
+          <AuthButton />
         </div>
       </div>
     </nav>
