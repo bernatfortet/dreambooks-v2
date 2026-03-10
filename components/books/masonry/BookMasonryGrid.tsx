@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef, useLayoutEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import { usePaginatedQuery } from 'convex/react'
 import { api } from '@/convex/_generated/api'
 import { Button } from '@/components/ui/button'
@@ -37,6 +38,7 @@ export type BookMasonryItem = {
   coverHeight: number
   dominantColor?: string | null
   seriesPosition?: number | null
+  badge?: ReactNode
 }
 
 type MeasuredDimensions = {
@@ -123,6 +125,7 @@ export function BookMasonryList({ books, className }: BookMasonryListProps) {
             coverUrl={book.coverUrl}
             dominantColor={book.dominantColor}
             seriesPosition={book.seriesPosition}
+            badge={book.badge}
             style={{
               position: 'absolute',
               top: `${position.y}px`,

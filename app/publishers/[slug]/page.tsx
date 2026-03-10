@@ -5,8 +5,8 @@ import Link from 'next/link'
 import { useQuery } from 'convex/react'
 import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
+import { BookGridList, BookGridSkeleton } from '@/components/books/BookGrid'
 import { DataDebugPanel } from '@/components/ui/DataDebugPanel'
-import { BookCard } from '@/components/books/BookCard'
 import { PageContainer } from '@/components/ui/PageContainer'
 
 type PublisherPageProps = {
@@ -52,17 +52,7 @@ export default function PublisherPage({ params }: PublisherPageProps) {
       {publisher.books.length === 0 ? (
         <p className='text-muted-foreground'>No books from this publisher yet.</p>
       ) : (
-        <div className='grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4'>
-          {publisher.books.map((book: PublisherBook) => (
-            <BookCard
-              key={book._id}
-              slug={book.slug ?? book._id}
-              title={book.title}
-              coverUrl={book.coverUrl}
-              seriesPosition={book.seriesPosition}
-            />
-          ))}
-        </div>
+        <BookGridList books={publisher.books} />
       )}
 
       <DataDebugPanel data={publisher} label='Publisher Data' />
@@ -80,11 +70,7 @@ function PublisherDetailSkeleton() {
         <div className='h-4 bg-muted rounded animate-pulse w-1/4' />
       </div>
 
-      <div className='grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4'>
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className='aspect-2/3 bg-muted rounded-lg animate-pulse' />
-        ))}
-      </div>
+      <BookGridSkeleton count={6} />
     </PageContainer>
   )
 }

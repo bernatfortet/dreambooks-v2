@@ -7,8 +7,8 @@ import { useQuery } from 'convex/react'
 import { api } from '@/convex/_generated/api'
 import { isDev } from '@/lib/env'
 import { AuthorAdminPanel } from '@/components/authors/AuthorAdminPanel'
+import { BookGridList } from '@/components/books/BookGrid'
 import { DataDebugPanel } from '@/components/ui/DataDebugPanel'
-import { BookCard } from '@/components/books/BookCard'
 import { PageContainer } from '@/components/ui/PageContainer'
 
 type AuthorPageProps = {
@@ -109,17 +109,7 @@ function AuthorBooks({
   return (
     <div>
       <h2 className='font-semibold mb-4'>Books</h2>
-      <div className='grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4'>
-        {books.map((book) => (
-          <BookCard
-            key={book._id}
-            slug={book.slug ?? book._id}
-            title={book.title}
-            coverUrl={book.coverUrl}
-            seriesPosition={book.seriesPosition}
-          />
-        ))}
-      </div>
+        <BookGridList books={books.map((book) => ({ ...book, authors: [] }))} />
     </div>
   )
 }

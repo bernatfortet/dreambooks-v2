@@ -2,13 +2,14 @@
 
 import type { ReactNode } from 'react'
 import { BookMasonryGrid, BookMasonryList, type BookMasonryItem } from '@/components/books/masonry'
+import type { Id } from '@/convex/_generated/dataModel'
 import type { BookFilters } from './filters/types'
 
 type BookItem = {
-  _id: string
+  _id: Id<'books'>
   slug?: string | null
   title: string
-  authors: string[]
+  authors?: string[]
   cover?: {
     url?: string | null
     width?: number
@@ -20,6 +21,7 @@ type BookItem = {
   coverHeight?: number
   dominantColor?: string | null
   seriesPosition?: number | null
+  badge?: ReactNode
 }
 
 const BOOK_GRID_CLASSES = 'grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3'
@@ -78,11 +80,12 @@ function normalizeBookForMasonry(book: BookItem): BookMasonryItem {
     _id: book._id,
     slug: book.slug,
     title: book.title,
-    authors: book.authors,
+    authors: book.authors ?? [],
     coverUrl: book.cover?.url ?? book.coverUrl ?? null,
     coverWidth,
     coverHeight,
     dominantColor: book.cover?.dominantColor ?? book.dominantColor ?? null,
     seriesPosition: book.seriesPosition,
+    badge: book.badge,
   }
 }

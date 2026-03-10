@@ -6,8 +6,9 @@ import Image from 'next/image'
 import { useQuery } from 'convex/react'
 import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
+import { BookGridList, BookGridSkeleton } from '@/components/books/BookGrid'
 import { DataDebugPanel } from '@/components/ui/DataDebugPanel'
-import { BookCard, BookCardBadge } from '@/components/books/BookCard'
+import { BookCardBadge } from '@/components/books/BookCard'
 import { PageContainer } from '@/components/ui/PageContainer'
 
 type AwardPageProps = {
@@ -67,18 +68,12 @@ export default function AwardPage({ params }: AwardPageProps) {
       {award.books.length === 0 ? (
         <p className='text-muted-foreground'>No books have won this award yet.</p>
       ) : (
-        <div className='grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4'>
-          {award.books.map((book: AwardBook) => (
-            <BookCard
-              key={book._id}
-              slug={book.slug ?? book._id}
-              title={book.title}
-              authors={book.authors}
-              coverUrl={book.cover?.url ?? null}
-              badge={formatAwardBadge(book.year, book.category)}
-            />
-          ))}
-        </div>
+        <BookGridList
+          books={award.books.map((book: AwardBook) => ({
+            ...book,
+            badge: formatAwardBadge(book.year, book.category),
+          }))}
+        />
       )}
 
       <DataDebugPanel data={award} label='Award Data' />
@@ -112,15 +107,7 @@ function AwardDetailSkeleton() {
         </div>
       </div>
 
-      <div className='grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4'>
-        {Array.from({ length: 6 }).map((_, index) => (
-          <div key={index} className='space-y-2'>
-            <div className='aspect-2/3 bg-muted rounded-lg animate-pulse' />
-            <div className='h-4 bg-muted rounded animate-pulse w-3/4' />
-            <div className='h-3 bg-muted rounded animate-pulse w-1/2' />
-          </div>
-        ))}
-      </div>
+      <BookGridSkeleton count={6} />
     </PageContainer>
   )
 }

@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
+import type { ReactNode } from 'react'
 import { BookCardBadge } from '@/components/books/BookCard'
 
 type BookMasonryCardProps = {
@@ -12,6 +13,7 @@ type BookMasonryCardProps = {
   coverUrl: string | null
   dominantColor?: string | null
   seriesPosition?: number | null
+  badge?: ReactNode
   style: React.CSSProperties
   imageHeight: number
   priority?: boolean
@@ -25,13 +27,14 @@ export function BookMasonryCard({
   coverUrl,
   dominantColor,
   seriesPosition,
+  badge,
   style,
   imageHeight,
   priority = false,
   onImageMeasure,
 }: BookMasonryCardProps) {
   const [isLoaded, setIsLoaded] = useState(false)
-  const displayBadge = seriesPosition ? <BookCardBadge>#{seriesPosition}</BookCardBadge> : null
+  const displayBadge = badge ?? (seriesPosition ? <BookCardBadge>#{seriesPosition}</BookCardBadge> : null)
   const imageSizes = typeof style.width === 'number' ? `${Math.round(style.width)}px` : style.width ?? '200px'
 
   return (
