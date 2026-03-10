@@ -2,6 +2,7 @@
 
 import { useAuthActions, useAuthToken } from '@convex-dev/auth/react'
 import { api } from '@/convex/_generated/api'
+import { Loader } from '@/components/atomic/Loader'
 import { useConvexAuth, useQuery } from 'convex/react'
 import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -45,7 +46,16 @@ export function AuthButton() {
 
   return (
     <Button variant='outline' size='sm' disabled={isPending} onClick={() => void handleSignIn()}>
-      {pendingAction === 'sign-in' ? 'Redirecting...' : 'Sign in with Google'}
+      {pendingAction === 'sign-in' ? (
+        <span className='relative inline-flex items-center justify-center'>
+          <span className='invisible'>Sign in with Google</span>
+          <span className='absolute inset-0 flex items-center justify-center'>
+            <Loader size={16} className='fill-current text-current' />
+          </span>
+        </span>
+      ) : (
+        'Sign in with Google'
+      )}
     </Button>
   )
 
