@@ -89,7 +89,7 @@ export function getWorkerId(): string {
 
 type ItemLog = {
   timestamp: string
-  type: 'book' | 'series' | 'author' | 'enrichment'
+  type: 'book' | 'series' | 'author' | 'enrichment' | 'book-intake'
   url: string
   referrerUrl?: string
   referrerReason?: string

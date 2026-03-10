@@ -3,6 +3,7 @@ import type { DatabaseReader } from '../_generated/server'
 import { paginationOptsValidator } from 'convex/server'
 import { v } from 'convex/values'
 import { Id, Doc } from '../_generated/dataModel'
+import { isBookVisibleForDiscovery } from '../lib/bookVisibility'
 
 /**
  * Helper to resolve cover URLs from storage IDs and build enriched cover object.
@@ -93,25 +94,64 @@ async function getLinkedAuthors(
   return authors.filter((author): author is NonNullable<typeof author> => author !== null)
 }
 
+function filterVisibleBooks<T extends Pick<Doc<'books'>, 'catalogStatus'>>(books: T[]): T[] {
+  return books.filter((book) => isBookVisibleForDiscovery(book))
+}
+
+async function resolveBooksWithCovers(
+  storage: { getUrl: (id: Id<'_storage'>) => Promise<string | null> },
+  books: Doc<'books'>[],
+) {
+  return await Promise.all(
+    books.map(async (book) => {
+      const cover = await resolveCover(storage, book)
+      return { ...book, cover }
+    }),
+  )
+}
+
+function sortBooksForDiscovery<T extends Pick<Doc<'books'>, 'ratingScore' | '_creationTime'>>(books: T[]) {
+  books.sort((a, b) => {
+    const scoreA = a.ratingScore ?? 0
+    const scoreB = b.ratingScore ?? 0
+    if (scoreB !== scoreA) return scoreB - scoreA
+    return b._creationTime - a._creationTime
+  })
+
+  return books
+}
+
+function paginateCollectionPage<T extends { _id: string }>(
+  items: T[],
+  paginationOpts: { cursor: string | null; numItems: number },
+) {
+  let startIndex = 0
+
+  if (paginationOpts.cursor) {
+    const cursorIndex = items.findIndex((item) => item._id === paginationOpts.cursor)
+    if (cursorIndex >= 0) {
+      startIndex = cursorIndex + 1
+    }
+  }
+
+  const endIndex = startIndex + paginationOpts.numItems
+  const page = items.slice(startIndex, endIndex)
+  const isDone = endIndex >= items.length
+  const lastItem = page[page.length - 1]
+  const continueCursor = !isDone && lastItem ? lastItem._id : null
+
+  return {
+    continueCursor: continueCursor ?? '',
+    isDone,
+    page,
+  }
+}
+
 export const list = query({
   handler: async (context) => {
-    const books = await context.db.query('books').collect()
-
-    // Sort by ratingScore desc, then _creationTime desc as tie-breaker
-    books.sort((a, b) => {
-      const scoreA = a.ratingScore ?? 0
-      const scoreB = b.ratingScore ?? 0
-      if (scoreB !== scoreA) return scoreB - scoreA
-      return b._creationTime - a._creationTime
-    })
-
-    // Resolve cover URLs for all books
-    const booksWithCovers = await Promise.all(
-      books.map(async (book) => {
-        const cover = await resolveCover(context.storage, book)
-        return { ...book, cover }
-      }),
-    )
+    const allBooks = await context.db.query('books').collect()
+    const books = sortBooksForDiscovery(filterVisibleBooks(allBooks))
+    const booksWithCovers = await resolveBooksWithCovers(context.storage, books)
 
     return booksWithCovers
   },
@@ -122,15 +162,14 @@ export const listPaginated = query({
     paginationOpts: paginationOptsValidator,
   },
   handler: async (context, args) => {
-    // Use index-based pagination by ratingScore (index implicitly includes _creationTime as tie-breaker)
-    const paginatedResult = await context.db.query('books').withIndex('by_ratingScore').order('desc').paginate(args.paginationOpts)
+    const paginatedResult = await context.db
+      .query('books')
+      .withIndex('by_ratingScore')
+      .order('desc')
+      .filter((q) => q.neq(q.field('catalogStatus'), 'hidden'))
+      .paginate(args.paginationOpts)
 
-    const booksWithCovers = await Promise.all(
-      paginatedResult.page.map(async (book) => {
-        const cover = await resolveCover(context.storage, book)
-        return { ...book, cover }
-      }),
-    )
+    const booksWithCovers = await resolveBooksWithCovers(context.storage, paginatedResult.page)
 
     return {
       ...paginatedResult,
@@ -186,7 +225,7 @@ export const listPaginatedWithFilters = query({
   },
   handler: async (context, args) => {
     const filters = args.filters || {}
-    let allBooks = await context.db.query('books').order('desc').collect()
+    let allBooks = filterVisibleBooks(await context.db.query('books').order('desc').collect())
 
     // Filter by series
     if (filters.seriesFilter === 'with-series') {
@@ -246,44 +285,15 @@ export const listPaginatedWithFilters = query({
       allBooks = allBooks.filter((book) => bookIdsWithAwards.has(book._id))
     }
 
-    // Sort by ratingScore desc, then _creationTime desc as tie-breaker
-    allBooks.sort((a, b) => {
-      const scoreA = a.ratingScore ?? 0
-      const scoreB = b.ratingScore ?? 0
-      if (scoreB !== scoreA) return scoreB - scoreA
-      return b._creationTime - a._creationTime
-    })
+    sortBooksForDiscovery(allBooks)
 
-    // Apply pagination manually
-    // Find start index based on cursor
-    let startIndex = 0
-    if (args.paginationOpts.cursor) {
-      const cursorIndex = allBooks.findIndex((book) => book._id === args.paginationOpts.cursor)
-      if (cursorIndex >= 0) {
-        startIndex = cursorIndex + 1
-      }
-    }
-
-    const numItems = args.paginationOpts.numItems
-    const endIndex = startIndex + numItems
-    const page = allBooks.slice(startIndex, endIndex)
-
-    // Resolve cover URLs
-    const booksWithCovers = await Promise.all(
-      page.map(async (book) => {
-        const cover = await resolveCover(context.storage, book)
-        return { ...book, cover }
-      }),
-    )
-
-    const isDone = endIndex >= allBooks.length
-    const lastBook = page[page.length - 1]
-    const continueCursor = !isDone && lastBook ? lastBook._id : null
+    const paginatedResult = paginateCollectionPage(allBooks, args.paginationOpts)
+    const booksWithCovers = await resolveBooksWithCovers(context.storage, paginatedResult.page)
 
     return {
+      continueCursor: paginatedResult.continueCursor,
+      isDone: paginatedResult.isDone,
       page: booksWithCovers,
-      isDone,
-      continueCursor,
     }
   },
 })
@@ -311,11 +321,15 @@ export const listForGrid = query({
       }),
     ),
     isDone: v.boolean(),
-    continueCursor: v.union(v.string(), v.null()),
+    continueCursor: v.string(),
   }),
   handler: async (context, args) => {
-    // Use index-based pagination by ratingScore (index implicitly includes _creationTime as tie-breaker)
-    const result = await context.db.query('books').withIndex('by_ratingScore').order('desc').paginate(args.paginationOpts)
+    const result = await context.db
+      .query('books')
+      .withIndex('by_ratingScore')
+      .order('desc')
+      .filter((q) => q.neq(q.field('catalogStatus'), 'hidden'))
+      .paginate(args.paginationOpts)
 
     const page = await Promise.all(
       result.page.map(async (book) => {
@@ -338,7 +352,7 @@ export const listForGrid = query({
     return {
       page,
       isDone: result.isDone,
-      continueCursor: result.continueCursor ?? null,
+      continueCursor: result.continueCursor ?? '',
     }
   },
 })
@@ -504,7 +518,7 @@ export const getFilterOptions = query({
     gradeLevels: v.array(v.string()),
   }),
   handler: async (context) => {
-    const books = await context.db.query('books').collect()
+    const books = filterVisibleBooks(await context.db.query('books').collect())
 
     // Calculate counts for each age range bucket
     const ageRangeBuckets = AGE_RANGE_BUCKETS.map((bucket) => {

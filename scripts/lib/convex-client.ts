@@ -1,6 +1,7 @@
 import { ConvexHttpClient } from 'convex/browser'
 import { api } from '@/convex/_generated/api'
 import type { BookData } from '@/lib/scraping/domains/book/types'
+import type { BookReviewMetadata } from '@/lib/scraping/domains/book/review'
 import { FORMAT_PRIORITY, isAudioFormat } from '@/lib/scraping/domains/book/types'
 
 type ImportResult = {
@@ -10,6 +11,7 @@ type ImportResult = {
 
 export async function importBookToConvex(params: {
   scrapedData: BookData
+  reviewMetadata?: BookReviewMetadata
   amazonUrl: string
   skipCoverDownload?: boolean
   firstSeenFromUrl?: string
@@ -101,6 +103,13 @@ export async function importBookToConvex(params: {
 
   const result = await client.action(api.scraping.importBook.importFromLocalScrape, {
     scrapedData: cleanedData,
+    reviewMetadata: params.reviewMetadata
+      ? {
+          needsReview: params.reviewMetadata.needsReview,
+          reason: params.reviewMetadata.reason,
+          signalKey: params.reviewMetadata.signalKey,
+        }
+      : undefined,
     apiKey,
     skipCoverDownload,
     firstSeenFromUrl: params.firstSeenFromUrl,

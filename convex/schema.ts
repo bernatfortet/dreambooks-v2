@@ -37,6 +37,7 @@ export default defineSchema({
     bookId: v.optional(v.id('books')),
     seriesId: v.optional(v.id('series')),
     authorId: v.optional(v.id('authors')),
+    bookIntakeId: v.optional(v.id('bookIntake')),
     errorMessage: v.optional(v.string()),
     // Meta
     createdAt: v.number(),
@@ -46,6 +47,60 @@ export default defineSchema({
     .index('by_status', ['status'])
     .index('by_status_priority', ['status', 'priority'])
     .index('by_url', ['url']),
+
+  // ===================
+  // BOOK INTAKE
+  // ===================
+
+  bookIntake: defineTable({
+    title: v.string(),
+    authorName: v.optional(v.string()),
+    illustratorName: v.optional(v.string()),
+    searchQuery: v.string(),
+    sourceType: v.union(v.literal('manual'), v.literal('award'), v.literal('list')),
+    sourceKey: v.string(),
+    sourceLabel: v.optional(v.string()),
+    sourcePath: v.optional(v.string()),
+    sourcePage: v.optional(v.number()),
+    rawText: v.optional(v.string()),
+    sourceMetadataJson: v.optional(v.string()),
+    status: v.union(
+      v.literal('pending'),
+      v.literal('researching'),
+      v.literal('ready_to_scrape'),
+      v.literal('waiting_for_scrape'),
+      v.literal('linked'),
+      v.literal('needs_review'),
+      v.literal('failed'),
+    ),
+    attemptCount: v.number(),
+    lastAttemptAt: v.optional(v.number()),
+    leaseExpiresAt: v.optional(v.number()),
+    workerId: v.optional(v.string()),
+    lastError: v.optional(v.string()),
+    needsReviewReason: v.optional(v.string()),
+    matchedBookId: v.optional(v.id('books')),
+    matchedAsin: v.optional(v.string()),
+    matchedAmazonUrl: v.optional(v.string()),
+    scrapeQueueId: v.optional(v.id('scrapeQueue')),
+    candidateSnapshotJson: v.optional(v.string()),
+    linkedAwardName: v.optional(v.string()),
+    linkedAwardYear: v.optional(v.number()),
+    linkedAwardCategory: v.optional(v.string()),
+    linkedAwardResultType: v.optional(
+      v.union(v.literal('winner'), v.literal('honor'), v.literal('finalist'), v.literal('other')),
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    resolvedAt: v.optional(v.number()),
+  })
+    .index('by_status', ['status'])
+    .index('by_status_createdAt', ['status', 'createdAt'])
+    .index('by_matchedBookId', ['matchedBookId'])
+    .index('by_matchedAmazonUrl', ['matchedAmazonUrl'])
+    .index('by_sourceType', ['sourceType'])
+    .index('by_sourceKey', ['sourceKey'])
+    .index('by_scrapeQueueId', ['scrapeQueueId']),
 
   // ===================
   // SCRAPE ARTIFACTS (offline audit trail)
@@ -210,6 +265,15 @@ export default defineSchema({
     badScrape: v.optional(v.boolean()),
     badScrapeNotes: v.optional(v.string()),
     badScrapeMarkedAt: v.optional(v.number()),
+    // Review workflow - for suspicious but not necessarily broken books
+    needsReview: v.optional(v.boolean()),
+    needsReviewReason: v.optional(v.string()),
+    needsReviewSignalKey: v.optional(v.string()),
+    needsReviewMarkedAt: v.optional(v.number()),
+    // Catalog visibility - hidden books stay in the database but are removed from public discovery surfaces
+    catalogStatus: v.optional(v.union(v.literal('visible'), v.literal('hidden'))),
+    hiddenReason: v.optional(v.string()),
+    hiddenAt: v.optional(v.number()),
     // Provenance tracking - where this entity was first discovered
     firstSeenFromUrl: v.optional(v.string()), // Set once on initial import
     firstSeenReason: v.optional(v.string()),
@@ -230,6 +294,8 @@ export default defineSchema({
     .index('by_asin', ['asin'])
     .index('by_seriesId', ['seriesId'])
     .index('by_badScrape', ['badScrape'])
+    .index('by_needsReview', ['needsReview'])
+    .index('by_catalogStatus', ['catalogStatus'])
     .index('by_slug', ['slug'])
     .index('by_ratingScore', ['ratingScore'])
     .searchIndex('search_text', {
@@ -548,10 +614,19 @@ export default defineSchema({
     // Award details for this specific book
     year: v.optional(v.number()),
     category: v.optional(v.string()), // e.g., "Winner", "Honor Book", "Finalist"
+    resultType: v.optional(
+      v.union(v.literal('winner'), v.literal('honor'), v.literal('finalist'), v.literal('other')),
+    ),
+    sourceName: v.optional(v.string()),
+    sourcePage: v.optional(v.number()),
+    sourceText: v.optional(v.string()),
+    importBatchKey: v.optional(v.string()),
+    importedAt: v.optional(v.number()),
 
     createdAt: v.number(),
   })
     .index('by_bookId', ['bookId'])
     .index('by_awardId', ['awardId'])
-    .index('by_bookId_awardId', ['bookId', 'awardId']), // Uniqueness check
+    .index('by_bookId_awardId', ['bookId', 'awardId'])
+    .index('by_bookId_awardId_year_resultType', ['bookId', 'awardId', 'year', 'resultType']),
 })

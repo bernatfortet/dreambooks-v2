@@ -44,6 +44,62 @@ export async function fetchPendingQueueItems(limit: number = 5): Promise<QueueIt
   return items as QueueItem[]
 }
 
+export type BookIntakeItem = {
+  _id: Id<'bookIntake'>
+  title: string
+  authorName: string | null
+  illustratorName: string | null
+  searchQuery: string
+  sourceType: 'manual' | 'award' | 'list'
+  sourceLabel: string | null
+  sourcePath: string | null
+  sourcePage: number | null
+  rawText: string | null
+  sourceMetadataJson: string | null
+  linkedAwardName: string | null
+  linkedAwardYear: number | null
+  linkedAwardCategory: string | null
+  linkedAwardResultType: 'winner' | 'honor' | 'finalist' | 'other' | null
+}
+
+export async function claimNextBookIntake(workerId: string): Promise<BookIntakeItem | null> {
+  const client = getConvexClient()
+  const item = await client.mutation(api.bookIntake.mutations.claimNextPending, { workerId })
+  return item as BookIntakeItem | null
+}
+
+export async function markBookIntakeNeedsReview(params: {
+  intakeId: Id<'bookIntake'>
+  reason?: string
+  candidateSnapshotJson?: string
+  matchedAsin?: string
+  matchedAmazonUrl?: string
+}): Promise<void> {
+  const client = getConvexClient()
+  await client.mutation(api.bookIntake.mutations.markNeedsReview, params)
+}
+
+export async function markBookIntakeFailed(intakeId: Id<'bookIntake'>, errorMessage: string): Promise<void> {
+  const client = getConvexClient()
+  await client.mutation(api.bookIntake.mutations.markFailed, { intakeId, errorMessage })
+}
+
+export async function markBookIntakeResolvedExisting(params: {
+  intakeId: Id<'bookIntake'>
+  bookId: Id<'books'>
+}): Promise<void> {
+  const client = getConvexClient()
+  await client.mutation(api.bookIntake.mutations.markResolvedExisting, params)
+}
+
+export async function markBookIntakeReadyToScrape(params: {
+  intakeId: Id<'bookIntake'>
+  amazonUrl: string
+}): Promise<void> {
+  const client = getConvexClient()
+  await client.mutation(api.bookIntake.mutations.markReadyToScrape, params)
+}
+
 /**
  * @deprecated Use claimQueueItem instead for safe concurrent processing.
  */

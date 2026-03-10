@@ -1,3 +1,4 @@
+export { processBookIntakeFlow } from './book-intake'
 export { processQueueFlow } from './queue'
 export { processEnrichmentFlow } from './enrichment'
 export { processSeriesDiscoveryFlow } from './series-discovery'

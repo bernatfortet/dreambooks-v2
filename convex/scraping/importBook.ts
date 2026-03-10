@@ -66,6 +66,12 @@ type EditionImportInput = EditionIdentifierInput &
     format: string
   }
 
+const reviewMetadataValidator = v.object({
+  needsReview: v.boolean(),
+  reason: v.optional(v.string()),
+  signalKey: v.optional(v.string()),
+})
+
 // Validator for scraped book data from local Playwright scraper
 const scrapedBookDataValidator = v.object({
   title: v.string(),
@@ -137,6 +143,7 @@ const scrapedBookDataValidator = v.object({
 export const importFromLocalScrape = action({
   args: {
     scrapedData: scrapedBookDataValidator,
+    reviewMetadata: v.optional(reviewMetadataValidator),
     apiKey: v.string(),
     skipCoverDownload: v.optional(v.boolean()),
     firstSeenFromUrl: v.optional(v.string()),
@@ -222,6 +229,16 @@ export const importFromLocalScrape = action({
     const { bookId, isNew, coverSourceUrlChanged } = result
 
     console.log('✅ Book imported', { bookId, isNew, title: args.scrapedData.title })
+
+    if (args.reviewMetadata) {
+      await context.runMutation(internal.books.mutations.applyNeedsReviewFromScrape, {
+        bookId,
+        needsReview: args.reviewMetadata.needsReview,
+        reason: args.reviewMetadata.reason,
+        signalKey: args.reviewMetadata.signalKey,
+      })
+    }
+
     await linkBookToExistingAuthors(context, {
       bookId,
       scrapedData: args.scrapedData,

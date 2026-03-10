@@ -18,6 +18,7 @@ import * as dotenv from 'dotenv'
 import { PageManager } from './browser'
 import { formatTime } from './utils'
 import {
+  processBookIntakeFlow,
   processQueueFlow,
   processEnrichmentFlow,
   processSeriesDiscoveryFlow,
@@ -108,7 +109,15 @@ async function runWorkerLoop(config: WorkerConfig): Promise<void> {
     // Get a healthy page (auto-reconnects if tab was closed)
     const page = await pageManager.getPage()
 
-    // Priority 1: Process queue items (new URLs added from UI)
+    // Priority 1: Research title/author intake items
+    try {
+      const intakeResult = await processBookIntakeFlow({ dryRun: config.dryRun })
+      if (intakeResult.workDone) workDone = true
+    } catch (error) {
+      console.error('🚨 Error processing book intake:', error)
+    }
+
+    // Priority 2: Process queue items (new URLs added from UI)
     try {
       const queueResult = await processQueueFlow({ page, pageManager, dryRun: config.dryRun })
       if (queueResult.workDone) workDone = true
@@ -116,7 +125,7 @@ async function runWorkerLoop(config: WorkerConfig): Promise<void> {
       console.error('🚨 Error processing queue:', error)
     }
 
-    // Priority 2: Enrich books with basic details
+    // Priority 3: Enrich books with basic details
     try {
       const enrichResult = await processEnrichmentFlow({ page, pageManager, dryRun: config.dryRun })
       if (enrichResult.workDone) workDone = true
@@ -124,7 +133,7 @@ async function runWorkerLoop(config: WorkerConfig): Promise<void> {
       console.error('🚨 Error enriching books:', error)
     }
 
-    // Priority 3: Discover series URLs (for series without sourceUrl)
+    // Priority 4: Discover series URLs (for series without sourceUrl)
     try {
       const discoveryResult = await processSeriesDiscoveryFlow({ page, pageManager, dryRun: config.dryRun })
       if (discoveryResult.workDone) workDone = true
@@ -132,7 +141,7 @@ async function runWorkerLoop(config: WorkerConfig): Promise<void> {
       console.error('🚨 Error discovering series URLs:', error)
     }
 
-    // Priority 4: Scrape pending/partial series
+    // Priority 5: Scrape pending/partial series
     try {
       const scrapingResult = await processSeriesScrapingFlow({ page, pageManager, dryRun: config.dryRun })
       if (scrapingResult.workDone) workDone = true
@@ -140,7 +149,7 @@ async function runWorkerLoop(config: WorkerConfig): Promise<void> {
       console.error('🚨 Error scraping series:', error)
     }
 
-    // Priority 5: Queue outdated entities for re-scraping (version upgrades)
+    // Priority 6: Queue outdated entities for re-scraping (version upgrades)
     try {
       const upgradeResult = await processVersionUpgradeFlow({ dryRun: config.dryRun })
       if (upgradeResult.workDone) workDone = true
@@ -277,11 +286,12 @@ Prerequisites:
   /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222
 
 What the worker processes (in priority order):
-  1. Queued URLs (from /ad/ UI) - books, series, or authors
-  2. Books needing enrichment (detailsStatus: 'basic')
-  3. Series URL discovery (pending series without sourceUrl)
-  4. Series scraping (scrapeStatus: 'pending' or 'partial')
-  5. Version upgrades (entities with scrapeVersion < current version)
+  1. Book intake research items (title/author queue)
+  2. Queued URLs (from /ad/ UI) - books, series, or authors
+  3. Books needing enrichment (detailsStatus: 'basic')
+  4. Series URL discovery (pending series without sourceUrl)
+  5. Series scraping (scrapeStatus: 'pending' or 'partial')
+  6. Version upgrades (entities with scrapeVersion < current version)
 `)
     process.exit(0)
   }

@@ -3,7 +3,8 @@ import { v } from 'convex/values'
 import { SCRAPING_CONFIG } from '@/lib/scraping/config'
 import { SCRAPE_VERSIONS } from '../lib/scrapeVersions'
 import { extractAsin, extractAuthorId, extractSeriesId, normalizeAmazonUrl } from '@/lib/scraping/utils/amazon-url'
-import type { DatabaseReader } from '../_generated/server'
+import type { DatabaseReader, MutationCtx } from '../_generated/server'
+import { internal } from '../_generated/api'
 
 const LEASE_DURATION_MS = SCRAPING_CONFIG.queue.leaseDurationMs
 
@@ -135,6 +136,7 @@ export const enqueue = mutation({
     skipAuthorDiscovery: v.optional(v.boolean()), // Book: don't queue authors
     skipBookDiscoveries: v.optional(v.boolean()), // Series: don't queue books
     skipCoverDownload: v.optional(v.boolean()), // All: don't download cover/image
+    bookIntakeId: v.optional(v.id('bookIntake')),
   },
   returns: v.union(
     v.object({
@@ -212,6 +214,7 @@ export const enqueue = mutation({
       skipAuthorDiscovery: args.skipAuthorDiscovery,
       skipBookDiscoveries: args.skipBookDiscoveries,
       skipCoverDownload: args.skipCoverDownload,
+      bookIntakeId: args.bookIntakeId,
       createdAt: Date.now(),
     })
 
@@ -296,6 +299,9 @@ export const markComplete = mutation({
   },
   returns: v.null(),
   handler: async (context, args) => {
+    const queueItem = await context.db.get(args.queueId)
+    if (!queueItem) return null
+
     await context.db.patch(args.queueId, {
       status: 'complete',
       bookId: args.bookId,
@@ -303,6 +309,15 @@ export const markComplete = mutation({
       authorId: args.authorId,
       completedAt: Date.now(),
     })
+
+    if (queueItem.bookIntakeId && args.bookId) {
+      await context.runMutation(internal.bookIntake.mutations.attachScrapedBook, {
+        intakeId: queueItem.bookIntakeId,
+        bookId: args.bookId,
+        scrapeQueueId: args.queueId,
+      })
+    }
+
     return null
   },
 })
@@ -317,11 +332,23 @@ export const markError = mutation({
   },
   returns: v.null(),
   handler: async (context, args) => {
+    const queueItem = await context.db.get(args.queueId)
+    if (!queueItem) return null
+
     await context.db.patch(args.queueId, {
       status: 'error',
       errorMessage: args.errorMessage,
       completedAt: Date.now(),
     })
+
+    if (queueItem.bookIntakeId) {
+      await context.runMutation(internal.bookIntake.mutations.markScrapeFailed, {
+        intakeId: queueItem.bookIntakeId,
+        scrapeQueueId: args.queueId,
+        errorMessage: args.errorMessage,
+      })
+    }
+
     return null
   },
 })
@@ -585,6 +612,23 @@ export const recoverExpiredLeases = internalMutation({
  * Looks up the entity's URL and queues it with optional skip flags.
  * Removes any existing queue entry for the URL to allow re-processing.
  */
+export const queueExplicitRescrape = internalMutation({
+  args: {
+    entityType: v.union(v.literal('book'), v.literal('series'), v.literal('author')),
+    url: v.string(),
+    displayName: v.optional(v.string()),
+    displayImageUrl: v.optional(v.string()),
+    skipSeriesLink: v.optional(v.boolean()),
+    skipAuthorDiscovery: v.optional(v.boolean()),
+    skipBookDiscoveries: v.optional(v.boolean()),
+    skipCoverDownload: v.optional(v.boolean()),
+  },
+  returns: v.id('scrapeQueue'),
+  handler: async (context, args) => {
+    return await queueExplicitRescrapeByUrl(context, args)
+  },
+})
+
 export const queueRescrape = mutation({
   args: {
     entityType: v.union(v.literal('book'), v.literal('series'), v.literal('author')),
@@ -605,42 +649,16 @@ export const queueRescrape = mutation({
       throw new Error(`${args.entityType} has no source URL - cannot re-scrape`)
     }
 
-    const cleanedUrl = cleanUrl(url, true) // Enable URL normalization logging
-
-    // Skip hardcoded URLs (non-book/product pages)
-    if (shouldSkipUrl(cleanedUrl)) {
-      throw new Error('This URL is blocked from being queued')
-    }
-
-    // Remove any existing queue entry for this URL (allows re-queuing)
-    const existingItems = await context.db
-      .query('scrapeQueue')
-      .withIndex('by_url', (q) => q.eq('url', cleanedUrl))
-      .collect()
-
-    for (const item of existingItems) {
-      await context.db.delete(item._id)
-    }
-
-    const queueId = await context.db.insert('scrapeQueue', {
-      url: cleanedUrl,
-      type: args.entityType,
-      status: 'pending',
-      priority: 5,
+    const queueId = await queueExplicitRescrapeByUrl(context, {
+      entityType: args.entityType,
+      url,
       displayName,
       displayImageUrl,
-      scrapeFullSeries: false,
-      source: 'user',
-      referrerUrl: cleanedUrl, // Self-referrer for re-scrapes
-      referrerReason: 'rescrape',
       skipSeriesLink: args.skipSeriesLink,
       skipAuthorDiscovery: args.skipAuthorDiscovery,
       skipBookDiscoveries: args.skipBookDiscoveries,
       skipCoverDownload: args.skipCoverDownload,
-      createdAt: Date.now(),
     })
-
-    console.log('🔄 Queued for re-scrape', { entityType: args.entityType, url: cleanedUrl, queueId })
 
     return queueId
   },
@@ -728,6 +746,57 @@ type EntityInfo = {
   url: string | undefined
   displayName: string | undefined
   displayImageUrl: string | undefined
+}
+
+async function queueExplicitRescrapeByUrl(
+  context: MutationCtx,
+  args: {
+    entityType: 'book' | 'series' | 'author'
+    url: string
+    displayName?: string
+    displayImageUrl?: string
+    skipSeriesLink?: boolean
+    skipAuthorDiscovery?: boolean
+    skipBookDiscoveries?: boolean
+    skipCoverDownload?: boolean
+  },
+) {
+  const cleanedUrl = cleanUrl(args.url, true)
+
+  if (shouldSkipUrl(cleanedUrl)) {
+    throw new Error('This URL is blocked from being queued')
+  }
+
+  const existingItems = await context.db
+    .query('scrapeQueue')
+    .withIndex('by_url', (q) => q.eq('url', cleanedUrl))
+    .collect()
+
+  for (const item of existingItems) {
+    await context.db.delete(item._id)
+  }
+
+  const queueId = await context.db.insert('scrapeQueue', {
+    url: cleanedUrl,
+    type: args.entityType,
+    status: 'pending',
+    priority: 5,
+    displayName: args.displayName,
+    displayImageUrl: args.displayImageUrl,
+    scrapeFullSeries: false,
+    source: 'user',
+    referrerUrl: cleanedUrl,
+    referrerReason: 'rescrape',
+    skipSeriesLink: args.skipSeriesLink,
+    skipAuthorDiscovery: args.skipAuthorDiscovery,
+    skipBookDiscoveries: args.skipBookDiscoveries,
+    skipCoverDownload: args.skipCoverDownload,
+    createdAt: Date.now(),
+  })
+
+  console.log('🔄 Queued for re-scrape', { entityType: args.entityType, url: cleanedUrl, queueId })
+
+  return queueId
 }
 
 function extractEntityInfo(entityType: 'book' | 'series' | 'author', entity: Record<string, unknown>): EntityInfo {

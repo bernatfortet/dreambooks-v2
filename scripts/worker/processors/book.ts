@@ -1,6 +1,7 @@
 import type { Page } from 'playwright'
 import { type BookData, isAudioFormat } from '@/lib/scraping/domains/book/types'
 import { parseBookFromPage } from '@/lib/scraping/domains/book/parse'
+import { classifyBookForReview } from '@/lib/scraping/domains/book/review'
 import { discoverBookLinks } from '@/lib/scraping/domains/book/discover'
 import { extractAuthorId } from '@/lib/scraping/utils/amazon-url'
 import { detectAmazonPageType } from '@/lib/scraping/utils/page-type-detector'
@@ -76,6 +77,11 @@ export async function processBookFromQueue(params: { item: QueueItem; page: Page
   log(`   ✅ Parsed: ${bookData.title}`)
   log(`   Authors: ${bookData.authors?.join(', ') ?? 'Unknown'}`)
 
+  const reviewMetadata = classifyBookForReview(bookData)
+  if (reviewMetadata.needsReview) {
+    log(`   🏷️ Needs review: ${reviewMetadata.reason}`)
+  }
+
   // Backfill queue preview metadata for user-enqueued items (discovery items already include it).
   if (!dryRun && item.source === 'user') {
     const client = getConvexClient()
@@ -114,6 +120,7 @@ export async function processBookFromQueue(params: { item: QueueItem; page: Page
   try {
     const importResult = await importBookToConvex({
       scrapedData: bookData,
+      reviewMetadata,
       amazonUrl: item.url,
       skipCoverDownload: item.skipCoverDownload,
       firstSeenFromUrl: item.referrerUrl,

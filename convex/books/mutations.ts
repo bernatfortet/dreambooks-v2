@@ -262,6 +262,130 @@ export const updateStatus = internalMutation({
   },
 })
 
+export const applyNeedsReviewFromScrape = internalMutation({
+  args: {
+    bookId: v.id('books'),
+    needsReview: v.boolean(),
+    reason: v.optional(v.string()),
+    signalKey: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (context, args) => {
+    const book = await context.db.get(args.bookId)
+    if (!book) return null
+
+    if (book.catalogStatus === 'hidden') {
+      return null
+    }
+
+    if (!args.needsReview) {
+      return null
+    }
+
+    await context.db.patch(args.bookId, {
+      needsReview: true,
+      needsReviewReason: args.reason,
+      needsReviewSignalKey: args.signalKey,
+      needsReviewMarkedAt: Date.now(),
+    })
+
+    return null
+  },
+})
+
+export const markNeedsReview = mutation({
+  args: {
+    bookId: v.id('books'),
+    reason: v.optional(v.string()),
+    signalKey: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (context, args) => {
+    const book = await context.db.get(args.bookId)
+    if (!book) {
+      throw new Error('Book not found')
+    }
+
+    await context.db.patch(args.bookId, {
+      needsReview: true,
+      needsReviewReason: args.reason,
+      needsReviewSignalKey: args.signalKey,
+      needsReviewMarkedAt: Date.now(),
+    })
+
+    return null
+  },
+})
+
+export const clearNeedsReview = mutation({
+  args: {
+    bookId: v.id('books'),
+  },
+  returns: v.null(),
+  handler: async (context, args) => {
+    const book = await context.db.get(args.bookId)
+    if (!book) {
+      throw new Error('Book not found')
+    }
+
+    await context.db.patch(args.bookId, {
+      needsReview: false,
+      needsReviewReason: undefined,
+      needsReviewSignalKey: undefined,
+      needsReviewMarkedAt: undefined,
+    })
+
+    return null
+  },
+})
+
+export const hideBook = mutation({
+  args: {
+    bookId: v.id('books'),
+    hiddenReason: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (context, args) => {
+    const book = await context.db.get(args.bookId)
+    if (!book) {
+      throw new Error('Book not found')
+    }
+
+    await context.db.patch(args.bookId, {
+      catalogStatus: 'hidden',
+      hiddenReason: args.hiddenReason,
+      hiddenAt: Date.now(),
+      needsReview: false,
+      needsReviewReason: undefined,
+      needsReviewSignalKey: undefined,
+      needsReviewMarkedAt: undefined,
+    })
+
+    return null
+  },
+})
+
+export const unhideBook = mutation({
+  args: {
+    bookId: v.id('books'),
+  },
+  returns: v.null(),
+  handler: async (context, args) => {
+    const book = await context.db.get(args.bookId)
+    if (!book) {
+      throw new Error('Book not found')
+    }
+
+    await context.db.patch(args.bookId, {
+      catalogStatus: 'visible',
+      hiddenReason: undefined,
+      hiddenAt: undefined,
+    })
+
+    return null
+  },
+})
+
 /**
  * Set the primary edition for a book.
  * The primary edition is the "main" bookEditions record (typically the one originally scraped).
@@ -872,7 +996,9 @@ async function moveBookRelations(context: MutationCtx, params: { fromBookId: Id<
   for (const link of bookAwards) {
     const existing = await context.db
       .query('bookAwards')
-      .withIndex('by_bookId_awardId', (q) => q.eq('bookId', toBookId).eq('awardId', link.awardId))
+      .withIndex('by_bookId_awardId_year_resultType', (q) =>
+        q.eq('bookId', toBookId).eq('awardId', link.awardId).eq('year', link.year).eq('resultType', link.resultType),
+      )
       .unique()
     if (existing) {
       await context.db.delete(link._id)

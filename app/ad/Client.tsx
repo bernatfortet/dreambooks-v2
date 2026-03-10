@@ -1,6 +1,8 @@
 'use client'
 
 import { BadScrapesSection } from '@/components/admin/BadScrapesSection'
+import { BookIntakeSection } from '@/components/admin/BookIntakeSection'
+import { BooksNeedingReviewSection } from '@/components/admin/BooksNeedingReviewSection'
 import { BookSubmitForm } from '@/components/books/BookSubmitForm'
 import { QueueList } from '@/components/scrape-queue/QueueList'
 import { Badge } from '@/components/ui/badge'
@@ -53,6 +55,10 @@ export default function AdminPage() {
         <h2 className='text-xl font-semibold mb-4'>Scrape Queue</h2>
         <QueueList />
       </section>
+
+      <BookIntakeSection />
+
+      <BooksNeedingReviewSection />
 
       <BadScrapesSection />
     </main>

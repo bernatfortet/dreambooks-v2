@@ -1,6 +1,8 @@
 import { query, internalQuery } from '../_generated/server'
+import { paginationOptsValidator } from 'convex/server'
 import { v } from 'convex/values'
 import { Id, Doc } from '../_generated/dataModel'
+import { isBookVisibleForDiscovery } from '../lib/bookVisibility'
 
 /**
  * Build book cover object for series queries.
@@ -24,6 +26,31 @@ async function buildBookCover(
     width,
     height,
     blurHash: book.cover?.blurHash ?? null,
+  }
+}
+
+function filterVisibleBooks<T extends Pick<Doc<'books'>, 'catalogStatus'>>(books: T[]): T[] {
+  return books.filter((book) => isBookVisibleForDiscovery(book))
+}
+
+const seriesGridItemValidator = v.object({
+  _id: v.id('series'),
+  coverUrl: v.union(v.string(), v.null()),
+  name: v.string(),
+  slug: v.union(v.string(), v.null()),
+})
+
+async function buildSeriesGridItem(
+  storage: { getUrl: (id: Id<'_storage'>) => Promise<string | null> },
+  series: Doc<'series'>,
+) {
+  const coverUrl = series.coverStorageId ? await storage.getUrl(series.coverStorageId) : null
+
+  return {
+    _id: series._id,
+    coverUrl,
+    name: series.name,
+    slug: series.slug ?? null,
   }
 }
 
@@ -56,6 +83,27 @@ export const list = query({
     )
 
     return seriesWithCovers
+  },
+})
+
+export const listPaginated = query({
+  args: {
+    paginationOpts: paginationOptsValidator,
+  },
+  returns: v.object({
+    continueCursor: v.string(),
+    isDone: v.boolean(),
+    page: v.array(seriesGridItemValidator),
+  }),
+  handler: async (context, args) => {
+    const paginatedResult = await context.db.query('series').order('desc').paginate(args.paginationOpts)
+    const page = await Promise.all(paginatedResult.page.map((series) => buildSeriesGridItem(context.storage, series)))
+
+    return {
+      continueCursor: paginatedResult.continueCursor ?? '',
+      isDone: paginatedResult.isDone,
+      page,
+    }
   },
 })
 
@@ -105,10 +153,11 @@ export const getWithBooks = query({
     const coverUrl = series.coverStorageId ? await context.storage.getUrl(series.coverStorageId) : null
 
     // Get scraped books in this series
-    const books = await context.db
+    const allBooks = await context.db
       .query('books')
       .withIndex('by_seriesId', (query) => query.eq('seriesId', args.id))
       .collect()
+    const books = filterVisibleBooks(allBooks)
 
     const booksWithCovers = await Promise.all(
       books.map(async (book) => {
@@ -154,10 +203,11 @@ export const getWithBooksBySlug = query({
     const coverUrl = series.coverStorageId ? await context.storage.getUrl(series.coverStorageId) : null
 
     // Get scraped books in this series
-    const books = await context.db
+    const allBooks = await context.db
       .query('books')
       .withIndex('by_seriesId', (query) => query.eq('seriesId', series._id))
       .collect()
+    const books = filterVisibleBooks(allBooks)
 
     const booksWithCovers = await Promise.all(
       books.map(async (book) => {
@@ -238,10 +288,11 @@ export const getWithBooksBySlugOrId = query({
     const coverUrl = series.coverStorageId ? await context.storage.getUrl(series.coverStorageId) : null
 
     // Get scraped books in this series
-    const books = await context.db
+    const allBooks = await context.db
       .query('books')
       .withIndex('by_seriesId', (query) => query.eq('seriesId', series._id))
       .collect()
+    const books = filterVisibleBooks(allBooks)
 
     const booksWithCovers = await Promise.all(
       books.map(async (book) => {

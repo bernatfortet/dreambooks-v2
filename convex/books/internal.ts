@@ -383,6 +383,7 @@ async function insertNewBook(
     title: cleanedTitle,
     authors: args.authors,
     source: args.source,
+    catalogStatus: 'visible',
     detailsStatus: args.detailsStatus,
     coverStatus: args.coverStatus,
     scrapedAt: Date.now(),

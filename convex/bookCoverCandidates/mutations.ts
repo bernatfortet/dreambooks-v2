@@ -1,4 +1,4 @@
-import { internalMutation, mutation } from '../_generated/server'
+import { internalMutation, mutation, type MutationCtx } from '../_generated/server'
 import { internal } from '../_generated/api'
 import type { Doc, Id } from '../_generated/dataModel'
 import { v } from 'convex/values'
@@ -220,8 +220,8 @@ export const deleteByBookId = internalMutation({
 })
 
 async function getCoverSourceMetadata(
-  context: Parameters<typeof selectCandidate.handler>[0],
-  editionId: string | undefined,
+  context: MutationCtx,
+  editionId: Id<'bookEditions'> | undefined,
 ): Promise<{ sourceAsin?: string; sourceFormat?: string }> {
   if (!editionId) return {}
 
@@ -235,7 +235,7 @@ async function getCoverSourceMetadata(
 }
 
 async function applySelectedCover(
-  context: Parameters<typeof selectCandidate.handler>[0],
+  context: MutationCtx,
   params: {
     bookId: Id<'books'>
     book: Doc<'books'>

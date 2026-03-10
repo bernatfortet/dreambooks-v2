@@ -1,5 +1,6 @@
 import { query } from '../_generated/server'
 import { v } from 'convex/values'
+import { normalizeIdentifier } from '../lib/identifiers'
 
 /**
  * List all awards for display.
@@ -8,6 +9,7 @@ export const list = query({
   returns: v.array(
     v.object({
       _id: v.id('awards'),
+      slug: v.optional(v.string()),
       name: v.string(),
       description: v.optional(v.string()),
       imageUrl: v.union(v.string(), v.null()),
@@ -28,6 +30,7 @@ export const list = query({
 
         return {
           _id: award._id,
+          slug: award.slug,
           name: award.name,
           description: award.description,
           imageUrl,
@@ -292,5 +295,120 @@ export const getWithBooksBySlug = query({
       createdAt: award.createdAt,
       books,
     }
+  },
+})
+
+/**
+ * Search existing books as candidates for award imports.
+ */
+export const findBookCandidatesForImport = query({
+  args: {
+    title: v.string(),
+    author: v.optional(v.string()),
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(
+    v.object({
+      bookId: v.id('books'),
+      title: v.string(),
+      authors: v.array(v.string()),
+      slug: v.union(v.string(), v.null()),
+      asin: v.optional(v.string()),
+      amazonUrl: v.optional(v.string()),
+      publishedDate: v.optional(v.string()),
+    }),
+  ),
+  handler: async (context, args) => {
+    const limit = args.limit ?? 8
+    const trimmedTitle = args.title.trim()
+    const trimmedAuthor = args.author?.trim()
+
+    if (!trimmedTitle) return []
+
+    const searchQueries = [trimmedTitle]
+    if (trimmedAuthor) {
+      searchQueries.push(`${trimmedTitle} ${trimmedAuthor}`)
+    }
+
+    const searchResults = await Promise.all(
+      searchQueries.map((searchQuery) =>
+        context.db.query('books').withSearchIndex('search_text', (q) => q.search('searchText', searchQuery)).take(limit * 2),
+      ),
+    )
+
+    const candidateMap = new Map<string, (typeof searchResults)[number][number]>()
+    for (const resultSet of searchResults) {
+      for (const book of resultSet) {
+        candidateMap.set(book._id, book)
+      }
+    }
+
+    return [...candidateMap.values()].slice(0, limit).map((book) => ({
+      bookId: book._id,
+      title: book.title,
+      authors: book.authors,
+      slug: book.slug ?? null,
+      asin: book.asin,
+      amazonUrl: book.amazonUrl,
+      publishedDate: book.publishedDate,
+    }))
+  },
+})
+
+/**
+ * Resolve a known identifier to an existing book for import scripts.
+ */
+export const findBookByIdentifierForImport = query({
+  args: {
+    asin: v.optional(v.string()),
+    isbn10: v.optional(v.string()),
+    isbn13: v.optional(v.string()),
+  },
+  returns: v.union(
+    v.object({
+      bookId: v.id('books'),
+      title: v.string(),
+      authors: v.array(v.string()),
+      slug: v.union(v.string(), v.null()),
+      asin: v.optional(v.string()),
+      amazonUrl: v.optional(v.string()),
+      publishedDate: v.optional(v.string()),
+      matchedBy: v.union(v.literal('asin'), v.literal('isbn10'), v.literal('isbn13')),
+    }),
+    v.null(),
+  ),
+  handler: async (context, args) => {
+    const candidates = [
+      args.asin ? { type: 'asin' as const, value: normalizeIdentifier('asin', args.asin) } : null,
+      args.isbn13 ? { type: 'isbn13' as const, value: normalizeIdentifier('isbn13', args.isbn13) } : null,
+      args.isbn10 ? { type: 'isbn10' as const, value: normalizeIdentifier('isbn10', args.isbn10) } : null,
+    ].filter(Boolean)
+
+    for (const candidate of candidates) {
+      if (!candidate) continue
+
+      const identifier = await context.db
+        .query('bookIdentifiers')
+        .withIndex('by_type_value', (q) => q.eq('type', candidate.type).eq('value', candidate.value))
+        .unique()
+
+      if (!identifier) continue
+
+      const book = await context.db.get(identifier.bookId)
+      if (!book) continue
+
+      return {
+        bookId: book._id,
+        title: book.title,
+        authors: book.authors,
+        slug: book.slug ?? null,
+        asin: book.asin,
+        amazonUrl: book.amazonUrl,
+        publishedDate: book.publishedDate,
+        matchedBy: candidate.type,
+      }
+    }
+
+    return null
   },
 })

@@ -10,8 +10,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { BadScrapeDialog } from '@/components/admin/BadScrapeDialog'
 import { RescrapeDialog } from '@/components/admin/RescrapeDialog'
 import { DeleteDialog } from '@/components/admin/DeleteDialog'
+import { BookVisibilityButton } from '@/components/books/BookVisibilityButton'
 import { ChangeCoverDialog } from '@/components/books/ChangeCoverDialog'
+import { ChangeAmazonUrlDialog } from '@/components/books/ChangeAmazonUrlDialog'
 import { BookEditionsList } from '@/components/books/BookEditionsList'
+import { NeedsReviewDialog } from '@/components/books/NeedsReviewDialog'
 import { DataDebugPanel } from '@/components/ui/DataDebugPanel'
 
 type Book = NonNullable<FunctionReturnType<typeof api.books.queries.getBySlugOrId>>
@@ -32,6 +35,8 @@ export function BookAdminPanel({ book }: BookAdminPanelProps) {
   const [isRefreshing, setIsRefreshing] = useState(false)
 
   const bookId = book._id
+  const isHidden = book.catalogStatus === 'hidden'
+  const showNeedsReview = !isHidden
   const refreshCover = useAction(api.scraping.refreshCover.forceDownloadCover)
   // TypeScript doesn't support bracket notation for slash-separated module paths in the generated API type
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -57,6 +62,8 @@ export function BookAdminPanel({ book }: BookAdminPanelProps) {
         <div className='flex items-center gap-2'>
           <CardTitle>Book Admin</CardTitle>
           {book.badScrape && <Badge variant='destructive'>Bad Scrape</Badge>}
+          {showNeedsReview && book.needsReview && <Badge variant='secondary'>Needs Review</Badge>}
+          {isHidden && <Badge variant='outline'>Hidden</Badge>}
         </div>
       </CardHeader>
       <CardContent className='space-y-4'>
@@ -64,10 +71,26 @@ export function BookAdminPanel({ book }: BookAdminPanelProps) {
           <div className='text-sm text-destructive bg-destructive/10 p-2 rounded'>{book.badScrapeNotes}</div>
         )}
 
+        {showNeedsReview && book.needsReview && book.needsReviewReason && (
+          <div className='text-sm bg-muted p-2 rounded'>{book.needsReviewReason}</div>
+        )}
+
+        {isHidden && (
+          <div className='text-sm bg-muted p-2 rounded'>
+            Hidden from public discovery{book.hiddenReason ? `: ${book.hiddenReason}` : '.'}
+          </div>
+        )}
+
         <div className='flex items-center gap-2 flex-wrap'>
           <BadScrapeDialog entityType='book' entityId={bookId} isBadScrape={!!book.badScrape} />
 
+          {showNeedsReview && (
+            <NeedsReviewDialog bookId={bookId} isNeedsReview={!!book.needsReview} initialReason={book.needsReviewReason} />
+          )}
+
           <RescrapeDialog entityType='book' entityId={bookId} hasSourceUrl={!!book.amazonUrl} />
+
+          <ChangeAmazonUrlDialog bookId={bookId} currentAmazonUrl={book.amazonUrl} />
 
           <DeleteDialog entityType='book' entityId={bookId} entityName={book.title} />
 
@@ -76,6 +99,12 @@ export function BookAdminPanel({ book }: BookAdminPanelProps) {
           </Button>
 
           <ChangeCoverDialog bookId={bookId} currentCoverUrl={book.cover?.sourceUrl} />
+
+          <BookVisibilityButton
+            bookId={bookId}
+            isHidden={isHidden}
+            hideReason={book.needsReviewReason ?? book.hiddenReason}
+          />
         </div>
 
         {book.amazonUrl && (

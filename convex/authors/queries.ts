@@ -1,7 +1,10 @@
 import { query, internalQuery } from '../_generated/server'
+import type { QueryCtx } from '../_generated/server'
+import { paginationOptsValidator } from 'convex/server'
 import { v } from 'convex/values'
 import { Id, Doc } from '../_generated/dataModel'
 import { resolveBookCoverUrls } from '../lib/bookCoverUrls'
+import { isBookVisibleForDiscovery } from '../lib/bookVisibility'
 
 /**
  * Resolve multiple image URLs from author's image storage IDs.
@@ -20,6 +23,139 @@ async function resolveImageUrls(
   const imageUrlLarge = largeId ? await storage.getUrl(largeId) : imageUrl
 
   return { imageUrl, imageUrlThumb, imageUrlLarge }
+}
+
+function filterVisibleBooks<T extends Pick<Doc<'books'>, 'catalogStatus'>>(books: T[]): T[] {
+  return books.filter((book) => isBookVisibleForDiscovery(book))
+}
+
+const authorBookValidator = v.object({
+  _id: v.id('books'),
+  slug: v.union(v.string(), v.null()),
+  title: v.string(),
+  coverUrl: v.union(v.string(), v.null()),
+  coverWidth: v.union(v.number(), v.null()),
+  coverHeight: v.union(v.number(), v.null()),
+})
+
+const authorListItemValidator = v.object({
+  _id: v.id('authors'),
+  slug: v.union(v.string(), v.null()),
+  name: v.string(),
+  imageUrlThumb: v.union(v.string(), v.null()),
+  imageUrl: v.union(v.string(), v.null()),
+  imageUrlLarge: v.union(v.string(), v.null()),
+  books: v.array(authorBookValidator),
+})
+
+type AuthorWithBookCount = {
+  _id: Id<'authors'>
+  slug: string | null
+  name: string
+  imageUrlThumb: string | null
+  imageUrl: string | null
+  imageUrlLarge: string | null
+  books: Array<{
+    _id: Id<'books'>
+    slug: string | null
+    title: string
+    coverUrl: string | null
+    coverWidth: number | null
+    coverHeight: number | null
+  }>
+  bookCount: number
+}
+
+async function buildAuthorWithTopBooks(
+  context: QueryCtx,
+  author: Doc<'authors'>,
+): Promise<AuthorWithBookCount> {
+  const { imageUrl, imageUrlThumb, imageUrlLarge } = await resolveImageUrls(context.storage, author)
+
+  const bookLinks = await context.db
+    .query('bookAuthors')
+    .withIndex('by_authorId', (q) => q.eq('authorId', author._id))
+    .collect()
+
+  const books = await Promise.all(
+    bookLinks.map(async (link) => {
+      const book = (await context.db.get(link.bookId)) as Doc<'books'> | null
+      if (!book) return null
+      if (!isBookVisibleForDiscovery(book)) return null
+
+      const { coverUrl } = await resolveBookCoverUrls(context.storage, book)
+
+      return {
+        _id: book._id,
+        slug: book.slug ?? null,
+        title: book.title,
+        coverUrl,
+        coverWidth: book.cover?.width ?? null,
+        coverHeight: book.cover?.height ?? null,
+      }
+    }),
+  )
+
+  const visibleBooks = books.filter((book): book is NonNullable<typeof book> => book !== null)
+
+  return {
+    _id: author._id,
+    slug: author.slug ?? null,
+    name: author.name,
+    imageUrlThumb,
+    imageUrl,
+    imageUrlLarge,
+    books: visibleBooks.slice(0, 5),
+    bookCount: visibleBooks.length,
+  }
+}
+
+async function buildAuthorsWithTopBooks(
+  context: QueryCtx,
+): Promise<AuthorWithBookCount[]> {
+  const allAuthors = await context.db.query('authors').order('desc').collect()
+  const authorsWithBooks = await Promise.all(allAuthors.map((author) => buildAuthorWithTopBooks(context, author)))
+
+  authorsWithBooks.sort((a, b) => b.bookCount - a.bookCount)
+
+  return authorsWithBooks
+}
+
+function paginateAuthorsPage(
+  authors: AuthorWithBookCount[],
+  paginationOpts: { cursor: string | null; numItems: number },
+) {
+  let startIndex = 0
+
+  if (paginationOpts.cursor) {
+    const cursorIndex = authors.findIndex((author) => author._id === paginationOpts.cursor)
+    if (cursorIndex >= 0) {
+      startIndex = cursorIndex + 1
+    }
+  }
+
+  const endIndex = startIndex + paginationOpts.numItems
+  const page = authors.slice(startIndex, endIndex)
+  const isDone = endIndex >= authors.length
+  const lastAuthor = page[page.length - 1]
+
+  return {
+    continueCursor: !isDone && lastAuthor ? lastAuthor._id : '',
+    isDone,
+    page,
+  }
+}
+
+function stripAuthorBookCount(author: AuthorWithBookCount) {
+  return {
+    _id: author._id,
+    slug: author.slug,
+    name: author.name,
+    imageUrlThumb: author.imageUrlThumb,
+    imageUrl: author.imageUrl,
+    imageUrlLarge: author.imageUrlLarge,
+    books: author.books,
+  }
 }
 
 /**
@@ -68,7 +204,7 @@ export const getBooksByAuthor = query({
 
     const books = await Promise.all(links.map((link) => context.db.get(link.bookId)))
 
-    return books.filter(Boolean)
+    return filterVisibleBooks(books.filter((book): book is Doc<'books'> => book !== null))
   },
 })
 
@@ -88,81 +224,31 @@ export const list = query({
  */
 export const listWithTopBooks = query({
   args: {},
-  returns: v.array(
-    v.object({
-      _id: v.id('authors'),
-      slug: v.union(v.string(), v.null()),
-      name: v.string(),
-      imageUrlThumb: v.union(v.string(), v.null()),
-      imageUrl: v.union(v.string(), v.null()),
-      imageUrlLarge: v.union(v.string(), v.null()),
-      books: v.array(
-        v.object({
-          _id: v.id('books'),
-          slug: v.union(v.string(), v.null()),
-          title: v.string(),
-          coverUrl: v.union(v.string(), v.null()),
-          coverWidth: v.union(v.number(), v.null()),
-          coverHeight: v.union(v.number(), v.null()),
-        }),
-      ),
-    }),
-  ),
+  returns: v.array(authorListItemValidator),
   handler: async (context) => {
-    const allAuthors = await context.db.query('authors').order('desc').collect()
+    const authorsWithBooks = await buildAuthorsWithTopBooks(context)
+    return authorsWithBooks.map(stripAuthorBookCount)
+  },
+})
 
-    const authorsWithBooks = await Promise.all(
-      allAuthors.map(async (author) => {
-        const { imageUrl, imageUrlThumb, imageUrlLarge } = await resolveImageUrls(context.storage, author)
+export const listWithTopBooksPaginated = query({
+  args: {
+    paginationOpts: paginationOptsValidator,
+  },
+  returns: v.object({
+    continueCursor: v.string(),
+    isDone: v.boolean(),
+    page: v.array(authorListItemValidator),
+  }),
+  handler: async (context, args) => {
+    const authorsWithBooks = await buildAuthorsWithTopBooks(context)
+    const paginatedResult = paginateAuthorsPage(authorsWithBooks, args.paginationOpts)
 
-        // Get books by this author
-        const bookLinks = await context.db
-          .query('bookAuthors')
-          .withIndex('by_authorId', (q) => q.eq('authorId', author._id))
-          .collect()
-
-        // Get book details with covers (limit to 5)
-        const books = await Promise.all(
-          bookLinks.slice(0, 5).map(async (link) => {
-            const book = (await context.db.get(link.bookId)) as Doc<'books'> | null
-            if (!book) return null
-
-            const { coverUrl } = await resolveBookCoverUrls(context.storage, book)
-
-            return {
-              _id: book._id,
-              slug: book.slug,
-              title: book.title,
-              coverUrl,
-              coverWidth: book.cover?.width ?? null,
-              coverHeight: book.cover?.height ?? null,
-            }
-          }),
-        )
-
-        return {
-          _id: author._id,
-          slug: author.slug ?? null,
-          name: author.name,
-          imageUrlThumb,
-          imageUrl,
-          imageUrlLarge,
-          books: books
-            .filter((b): b is NonNullable<typeof b> => b !== null)
-            .map((b) => ({
-              ...b,
-              slug: b.slug ?? null,
-            })),
-          bookCount: bookLinks.length,
-        }
-      }),
-    )
-
-    // Sort by book count (descending) - authors with most books first
-    const sorted = authorsWithBooks.sort((a, b) => b.bookCount - a.bookCount)
-
-    // Remove bookCount from returned objects (only used for sorting)
-    return sorted.map(({ bookCount, ...author }) => author)
+    return {
+      continueCursor: paginatedResult.continueCursor,
+      isDone: paginatedResult.isDone,
+      page: paginatedResult.page.map(stripAuthorBookCount),
+    }
   },
 })
 
@@ -233,6 +319,7 @@ export const getWithDetails = query({
       bookLinks.map(async (link) => {
         const book = (await context.db.get(link.bookId)) as Doc<'books'> | null
         if (!book) return null
+        if (!isBookVisibleForDiscovery(book)) return null
 
         const { coverUrl } = await resolveBookCoverUrls(context.storage, book)
 
@@ -255,7 +342,7 @@ export const getWithDetails = query({
       scrapeStatus: author.scrapeStatus,
       badScrape: author.badScrape ?? null,
       badScrapeNotes: author.badScrapeNotes ?? null,
-      bookCount: bookLinks.length,
+      bookCount: books.filter((b): b is NonNullable<typeof b> => b !== null).length,
       books: books.filter((b): b is NonNullable<typeof b> => b !== null),
     }
   },
@@ -309,6 +396,7 @@ export const getBySlug = query({
       bookLinks.map(async (link) => {
         const book = (await context.db.get(link.bookId)) as Doc<'books'> | null
         if (!book) return null
+        if (!isBookVisibleForDiscovery(book)) return null
 
         const { coverUrl } = await resolveBookCoverUrls(context.storage, book)
 
@@ -331,7 +419,7 @@ export const getBySlug = query({
       scrapeStatus: author.scrapeStatus,
       badScrape: author.badScrape ?? null,
       badScrapeNotes: author.badScrapeNotes ?? null,
-      bookCount: bookLinks.length,
+      bookCount: books.filter((b): b is NonNullable<typeof b> => b !== null).length,
       books: books.filter((b): b is NonNullable<typeof b> => b !== null),
     }
   },
@@ -381,6 +469,7 @@ export const getBySlugOrId = query({
         bookLinks.map(async (link) => {
           const book = (await context.db.get(link.bookId)) as Doc<'books'> | null
           if (!book) return null
+          if (!isBookVisibleForDiscovery(book)) return null
           const { coverUrl } = await resolveBookCoverUrls(context.storage, book)
           return {
             _id: book._id,
@@ -403,7 +492,7 @@ export const getBySlugOrId = query({
         scrapeStatus: bySlug.scrapeStatus,
         badScrape: bySlug.badScrape ?? null,
         badScrapeNotes: bySlug.badScrapeNotes ?? null,
-        bookCount: bookLinks.length,
+        bookCount: books.filter((b): b is NonNullable<typeof b> => b !== null).length,
         books: books.filter((b): b is NonNullable<typeof b> => b !== null),
       }
     }
@@ -421,6 +510,7 @@ export const getBySlugOrId = query({
           bookLinks.map(async (link) => {
             const book = (await context.db.get(link.bookId)) as Doc<'books'> | null
             if (!book) return null
+            if (!isBookVisibleForDiscovery(book)) return null
             const { coverUrl } = await resolveBookCoverUrls(context.storage, book)
             return {
               _id: book._id,
@@ -443,7 +533,7 @@ export const getBySlugOrId = query({
           scrapeStatus: byId.scrapeStatus,
           badScrape: byId.badScrape ?? null,
           badScrapeNotes: byId.badScrapeNotes ?? null,
-          bookCount: bookLinks.length,
+          bookCount: books.filter((b): b is NonNullable<typeof b> => b !== null).length,
           books: books.filter((b): b is NonNullable<typeof b> => b !== null),
         }
       }

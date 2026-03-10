@@ -1,5 +1,8 @@
 import { query } from '../_generated/server'
 import { v } from 'convex/values'
+import { isBookVisibleForDiscovery } from '../lib/bookVisibility'
+
+const SEARCH_OVERFETCH_MULTIPLIER = 3
 
 export const global = query({
   args: {
@@ -58,6 +61,7 @@ export const global = query({
   }),
   handler: async (context, args) => {
     const limit = args.limitPerType ?? 5
+    const searchLimit = limit * SEARCH_OVERFETCH_MULTIPLIER
     const trimmed = args.query.trim()
     if (!trimmed) {
       return { books: [], series: [], authors: [], exactMatch: null }
@@ -70,16 +74,18 @@ export const global = query({
       context.db
         .query('books')
         .withSearchIndex('search_text', (q) => q.search('searchText', trimmed))
-        .take(limit),
+        .take(searchLimit),
       context.db
         .query('series')
         .withSearchIndex('search_name', (q) => q.search('name', trimmed))
-        .take(limit),
+        .take(searchLimit),
       context.db
         .query('authors')
         .withSearchIndex('search_name', (q) => q.search('name', trimmed))
-        .take(limit),
+        .take(searchLimit),
     ])
+
+    const visibleBooks = rawBooks.filter((book) => isBookVisibleForDiscovery(book)).slice(0, limit)
 
     // Determine exact match (case-insensitive, priority: Book > Series > Author)
     let exactMatch:
@@ -103,9 +109,9 @@ export const global = query({
         }
       | null = null
 
-    const exactBook = rawBooks.find((b) => b.title.toLowerCase() === queryLower)
-    const exactSeries = rawSeries.find((s) => s.name.toLowerCase() === queryLower)
-    const exactAuthor = rawAuthors.find((a) => a.name.toLowerCase() === queryLower)
+    const exactBook = visibleBooks.find((b) => b.title.toLowerCase() === queryLower)
+    const exactSeries = rawSeries.slice(0, limit).find((s) => s.name.toLowerCase() === queryLower)
+    const exactAuthor = rawAuthors.slice(0, limit).find((a) => a.name.toLowerCase() === queryLower)
 
     if (exactBook) {
       exactMatch = {
@@ -132,7 +138,7 @@ export const global = query({
 
     // Resolve cover URLs for books and series
     const books = await Promise.all(
-      rawBooks.map(async (book) => {
+      visibleBooks.map(async (book) => {
         const coverStorageId = book.cover?.storageIdMedium
         const coverUrl = coverStorageId ? await context.storage.getUrl(coverStorageId) : null
         const coverWidth = book.cover?.width ?? 200
@@ -153,7 +159,7 @@ export const global = query({
     )
 
     const series = await Promise.all(
-      rawSeries.map(async (s) => ({
+      rawSeries.slice(0, limit).map(async (s) => ({
         _id: s._id,
         name: s.name,
         slug: s.slug ?? null,
@@ -161,7 +167,7 @@ export const global = query({
       })),
     )
 
-    const authors = rawAuthors.map((a) => ({ _id: a._id, name: a.name, slug: a.slug ?? null }))
+    const authors = rawAuthors.slice(0, limit).map((a) => ({ _id: a._id, name: a.name, slug: a.slug ?? null }))
 
     return { books, series, authors, exactMatch }
   },
