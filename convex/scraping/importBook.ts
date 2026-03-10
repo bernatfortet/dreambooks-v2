@@ -29,14 +29,13 @@ const EDITION_FORMAT_PRIORITY: Record<string, number> = {
   unknown: -2,
 }
 
+// Slash-separated Convex modules need bracket access here.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const bookEditionsMutations = (internal as any)['bookEditions/mutations']
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const bookIdentifiersMutations = (internal as any)['bookIdentifiers/mutations']
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const bookCoverCandidatesMutations = (internal as any)['bookCoverCandidates/mutations']
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const bookAuthorsMutations = (internal as any)['bookAuthors/mutations']
+const internalAny = internal as any
+const bookEditionsMutations = internalAny['bookEditions/mutations']
+const bookIdentifiersMutations = internalAny['bookIdentifiers/mutations']
+const bookCoverCandidatesMutations = internalAny['bookCoverCandidates/mutations']
+const bookAuthorsMutations = internalAny['bookAuthors/mutations']
 
 type BookIdentifierType = 'asin' | 'isbn10' | 'isbn13'
 type ImportedEdition = { editionId: Id<'bookEditions'>; format: string }
@@ -223,21 +222,10 @@ export const importFromLocalScrape = action({
     const { bookId, isNew, coverSourceUrlChanged } = result
 
     console.log('✅ Book imported', { bookId, isNew, title: args.scrapedData.title })
-
-    const authorLinkResult = await context.runMutation(bookAuthorsMutations.linkExistingAuthorsForBook, {
+    await linkBookToExistingAuthors(context, {
       bookId,
-      authorNames: args.scrapedData.authors,
-      amazonAuthorIds: args.scrapedData.amazonAuthorIds,
-      contributors: args.scrapedData.contributors,
+      scrapedData: args.scrapedData,
     })
-
-    if (authorLinkResult.linkedCount > 0) {
-      console.log('🔗 Linked book to existing authors', {
-        bookId,
-        linkedCount: authorLinkResult.linkedCount,
-        matchedAuthorCount: authorLinkResult.matchedAuthorCount,
-      })
-    }
 
     // Schedule cover download if we have a URL
     if (args.scrapedData.coverImageUrl && !args.skipCoverDownload) {
@@ -348,6 +336,33 @@ async function upsertBookEditions(
   }
 
   return pickPrimaryEditionId(importedEditions)
+}
+
+async function linkBookToExistingAuthors(
+  context: ActionCtx,
+  params: {
+    bookId: Id<'books'>
+    scrapedData: {
+      authors: string[]
+      amazonAuthorIds?: string[]
+      contributors?: Array<{ name: string; amazonAuthorId?: string; role: string }>
+    }
+  },
+): Promise<void> {
+  const authorLinkResult = await context.runMutation(bookAuthorsMutations.linkExistingAuthorsForBook, {
+    bookId: params.bookId,
+    authorNames: params.scrapedData.authors,
+    amazonAuthorIds: params.scrapedData.amazonAuthorIds,
+    contributors: params.scrapedData.contributors,
+  })
+
+  if (authorLinkResult.linkedCount === 0) return
+
+  console.log('🔗 Linked book to existing authors', {
+    bookId: params.bookId,
+    linkedCount: authorLinkResult.linkedCount,
+    matchedAuthorCount: authorLinkResult.matchedAuthorCount,
+  })
 }
 
 async function upsertPublisherIfNeeded(context: ActionCtx, publisher?: string): Promise<Id<'publishers'> | undefined> {

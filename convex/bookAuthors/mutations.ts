@@ -17,6 +17,8 @@ const contributorRoleValidator = v.union(
   v.literal('other'),
 )
 
+const linkSourceValidator = v.union(v.literal('amazonAuthorId'), v.literal('nameMatch'))
+
 /**
  * Link books to an author by amazonAuthorId (primary) or name (fallback).
  * Called after upserting an author to backfill book-author relationships.
@@ -30,55 +32,30 @@ export const linkByAmazonAuthorId = internalMutation({
   returns: v.number(),
   handler: async (context, args) => {
     let linkedCount = 0
-
-    const normalizedAuthorName = normalizePersonNameForMatch(args.authorName)
-
-    // Get all books - we need to scan for matching amazonAuthorIds or author names
     const allBooks = await context.db.query('books').collect()
 
     for (const book of allBooks) {
-      const hasAmazonId = book.amazonAuthorIds?.includes(args.amazonAuthorId)
-      const hasNameMatch =
-        book.authors.some((a) => a.toLowerCase() === args.authorName.toLowerCase()) ||
-        book.authors.some((a) => normalizePersonNameForMatch(a) === normalizedAuthorName)
+      const match = getBookMatchForAuthor({
+        book,
+        authorName: args.authorName,
+        amazonAuthorId: args.amazonAuthorId,
+      })
 
-      if (hasAmazonId || hasNameMatch) {
-        // Check if link already exists
-        const existing = await context.db
-          .query('bookAuthors')
-          .withIndex('by_bookId_authorId', (q) => q.eq('bookId', book._id).eq('authorId', args.authorId))
-          .unique()
+      if (!match) continue
 
-        if (!existing) {
-          // Look up role from book.contributors if available
-          let role: ContributorRole | undefined = undefined
-          if (book.contributors) {
-            const contributorNameNormalized = normalizePersonNameForMatch(args.authorName)
-            const contributor = book.contributors.find(
-              (c) =>
-                (hasAmazonId && c.amazonAuthorId === args.amazonAuthorId) ||
-                (hasNameMatch &&
-                  (c.name.toLowerCase() === args.authorName.toLowerCase() ||
-                    normalizePersonNameForMatch(c.name) === contributorNameNormalized)),
-            )
-            if (contributor) {
-              role = toContributorRole(contributor.role)
-            }
-          }
+      const inserted = await insertBookAuthorLink(context, {
+        bookId: book._id,
+        authorId: args.authorId,
+        source: match.source,
+        role: match.role,
+      })
 
-          await context.db.insert('bookAuthors', {
-            bookId: book._id,
-            authorId: args.authorId,
-            source: hasAmazonId ? 'amazonAuthorId' : 'nameMatch',
-            role,
-            createdAt: Date.now(),
-          })
-          linkedCount++
+      if (!inserted) continue
 
-          const roleText = role ? ` (${role})` : ''
-          console.log(`   📚 Linked book "${book.title}" to author (${hasAmazonId ? 'amazonAuthorId' : 'nameMatch'})${roleText}`)
-        }
-      }
+      linkedCount++
+
+      const roleText = match.role ? ` (${match.role})` : ''
+      console.log(`   📚 Linked book "${book.title}" to author (${match.source})${roleText}`)
     }
 
     console.log(`✅ Linked ${linkedCount} books to author`)
@@ -94,7 +71,7 @@ export const linkBookToAuthor = internalMutation({
   args: {
     bookId: v.id('books'),
     authorId: v.id('authors'),
-    source: v.string(), // 'amazonAuthorId' | 'nameMatch'
+    source: linkSourceValidator,
     role: v.optional(contributorRoleValidator),
   },
   returns: v.boolean(),
@@ -200,6 +177,7 @@ export const unlinkBookFromAuthor = mutation({
 })
 
 type ContributorRole = 'author' | 'illustrator' | 'editor' | 'translator' | 'narrator' | 'other'
+type LinkSource = 'amazonAuthorId' | 'nameMatch'
 
 async function linkExistingAuthorsForBookRecord(
   context: MutationCtx,
@@ -218,13 +196,13 @@ async function linkExistingAuthorsForBookRecord(
   let linkedCount = 0
 
   for (const author of matchedAuthors) {
-    const source = args.amazonAuthorIds?.includes(author.amazonAuthorId) ? 'amazonAuthorId' : 'nameMatch'
     const role = getContributorRoleForAuthor({
       author,
       authorNames: args.authorNames,
       amazonAuthorIds: args.amazonAuthorIds,
       contributors: args.contributors,
     })
+    const source = args.amazonAuthorIds?.includes(author.amazonAuthorId) ? 'amazonAuthorId' : 'nameMatch'
 
     const inserted = await insertBookAuthorLink(context, {
       bookId: args.bookId,
@@ -323,12 +301,65 @@ function getContributorRoleForAuthor(args: {
   return toContributorRole(contributor.role)
 }
 
+function getBookMatchForAuthor(args: {
+  book: Doc<'books'>
+  authorName: string
+  amazonAuthorId: string
+}): { source: LinkSource; role?: ContributorRole } | null {
+  const hasAmazonId = args.book.amazonAuthorIds?.includes(args.amazonAuthorId) ?? false
+  const hasNameMatch = hasBookAuthorNameMatch(args.book.authors, args.authorName)
+
+  if (!hasAmazonId && !hasNameMatch) return null
+
+  const contributor = findMatchingContributor({
+    contributors: args.book.contributors,
+    authorName: args.authorName,
+    amazonAuthorId: args.amazonAuthorId,
+    hasAmazonId,
+    hasNameMatch,
+  })
+
+  return {
+    source: hasAmazonId ? 'amazonAuthorId' : 'nameMatch',
+    role: contributor ? toContributorRole(contributor.role) : undefined,
+  }
+}
+
+function hasBookAuthorNameMatch(authorNames: string[], authorName: string) {
+  const normalizedAuthorName = normalizePersonNameForMatch(authorName)
+
+  return (
+    authorNames.some((name) => name.toLowerCase() === authorName.toLowerCase()) ||
+    authorNames.some((name) => normalizePersonNameForMatch(name) === normalizedAuthorName)
+  )
+}
+
+function findMatchingContributor(args: {
+  contributors?: Array<{ name: string; amazonAuthorId?: string; role: string }>
+  authorName: string
+  amazonAuthorId: string
+  hasAmazonId: boolean
+  hasNameMatch: boolean
+}) {
+  if (!args.contributors?.length) return undefined
+
+  const contributorNameNormalized = normalizePersonNameForMatch(args.authorName)
+
+  return args.contributors.find(
+    (contributor) =>
+      (args.hasAmazonId && contributor.amazonAuthorId === args.amazonAuthorId) ||
+      (args.hasNameMatch &&
+        (contributor.name.toLowerCase() === args.authorName.toLowerCase() ||
+          normalizePersonNameForMatch(contributor.name) === contributorNameNormalized)),
+  )
+}
+
 async function insertBookAuthorLink(
   context: MutationCtx,
   args: {
     bookId: Id<'books'>
     authorId: Id<'authors'>
-    source: string
+    source: LinkSource
     role?: ContributorRole
   },
 ) {
