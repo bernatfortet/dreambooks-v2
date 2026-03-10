@@ -50,6 +50,7 @@ import type * as lib_superadmin from "../lib/superadmin.js";
 import type * as lib_utils_ageRange from "../lib/utils/ageRange.js";
 import type * as lib_utils_gradeLevel from "../lib/utils/gradeLevel.js";
 import type * as migrations_backfillDetailsStatus from "../migrations/backfillDetailsStatus.js";
+import type * as migrations_backfillPreferredBookCovers from "../migrations/backfillPreferredBookCovers.js";
 import type * as migrations_backfillQueueSource from "../migrations/backfillQueueSource.js";
 import type * as publishers_mutations from "../publishers/mutations.js";
 import type * as publishers_queries from "../publishers/queries.js";
@@ -127,6 +128,7 @@ declare const fullApi: ApiFromModules<{
   "lib/utils/ageRange": typeof lib_utils_ageRange;
   "lib/utils/gradeLevel": typeof lib_utils_gradeLevel;
   "migrations/backfillDetailsStatus": typeof migrations_backfillDetailsStatus;
+  "migrations/backfillPreferredBookCovers": typeof migrations_backfillPreferredBookCovers;
   "migrations/backfillQueueSource": typeof migrations_backfillQueueSource;
   "publishers/mutations": typeof publishers_mutations;
   "publishers/queries": typeof publishers_queries;

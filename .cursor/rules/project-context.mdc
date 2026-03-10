@@ -53,6 +53,12 @@ Book data is scraped using Convex actions with scheduled functions for orchestra
 - `scheduler.runAfter()` chains pipeline steps
 - Status tracking on each entity (pending/complete/error)
 
+### Cover Selection
+When choosing a book cover, prefer non-audiobook editions whenever they exist.
+- Default priority: `hardcover` > `paperback` > `board_book` / `library_binding` / `spiral` > `kindle` > `audiobook`
+- Audiobook covers are a last resort only and should never win over an available print cover
+- When repairing existing bad covers, prefer promoting saved edition or cover-candidate data before queueing a fresh re-scrape
+
 ### Image Storage
 Book covers are stored in Convex File Storage, served via `next/image` for optimization.
 

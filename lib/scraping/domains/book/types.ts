@@ -7,14 +7,16 @@ export const FORMAT_PRIORITY: Record<string, number> = {
   unknown: 0,
 }
 
-// Cover source priority: paperback preferred (Kindle often has "Kindle Unlimited" branding)
+// Cover source priority: prefer non-audiobook print covers first.
 export const COVER_FORMAT_PRIORITY: Record<string, number> = {
-  paperback: 5, // Clean scans, no branding
-  kindle: 3, // Sometimes has "Kindle Unlimited" overlay
-  hardcover: 2, // Sometimes physical book photos
-  board_book: 1,
-  audiobook: 0,
-  unknown: 0,
+  hardcover: 5,
+  paperback: 4,
+  board_book: 3,
+  library_binding: 2,
+  spiral: 1,
+  kindle: 0,
+  audiobook: -1,
+  unknown: -2,
 }
 
 export function isAudioFormat(format: string | null | undefined): boolean {
