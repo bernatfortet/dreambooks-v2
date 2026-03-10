@@ -3,10 +3,14 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { useQuery } from 'convex/react'
+import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
 
+type SeriesListData = NonNullable<FunctionReturnType<typeof api.series.queries.list>>
+type SeriesListItem = SeriesListData[number]
+
 export function SeriesGrid() {
-  const seriesList = useQuery(api.series.queries.list)
+  const seriesList: SeriesListData | undefined = useQuery(api.series.queries.list)
 
   if (seriesList === undefined) {
     return <SeriesGridSkeleton />
@@ -18,7 +22,7 @@ export function SeriesGrid() {
 
   return (
     <div className='grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4'>
-      {seriesList.map((series) => (
+      {seriesList.map((series: SeriesListItem) => (
         <SeriesGridItem key={series._id} slug={series.slug ?? series._id} name={series.name} coverUrl={series.coverUrl} />
       ))}
     </div>

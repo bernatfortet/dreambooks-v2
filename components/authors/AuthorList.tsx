@@ -1,12 +1,16 @@
 'use client'
 
 import { useQuery } from 'convex/react'
+import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
 import Image from 'next/image'
 import Link from 'next/link'
 
+type AuthorListData = NonNullable<FunctionReturnType<typeof api.authors.queries.listWithTopBooks>>
+type AuthorListItem = AuthorListData[number]
+
 export function AuthorList() {
-  const authors = useQuery(api.authors.queries.listWithTopBooks)
+  const authors: AuthorListData | undefined = useQuery(api.authors.queries.listWithTopBooks)
 
   if (authors === undefined) {
     return <AuthorListSkeleton />
@@ -18,7 +22,7 @@ export function AuthorList() {
 
   return (
     <div className='space-y-8'>
-      {authors.map((author) => (
+      {authors.map((author: AuthorListItem) => (
         <AuthorItem key={author._id} slug={author.slug ?? author._id} name={author.name} imageUrl={author.imageUrl} books={author.books} />
       ))}
     </div>

@@ -1,12 +1,16 @@
 'use client'
 
 import { useQuery } from 'convex/react'
+import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
 import Image from 'next/image'
 import Link from 'next/link'
 
+type PublisherListData = NonNullable<FunctionReturnType<typeof api.publishers.queries.listWithTopBooks>>
+type PublisherListItem = PublisherListData[number]
+
 export function PublisherList() {
-  const publishers = useQuery(api.publishers.queries.listWithTopBooks)
+  const publishers: PublisherListData | undefined = useQuery(api.publishers.queries.listWithTopBooks)
 
   if (publishers === undefined) {
     return <PublisherListSkeleton />
@@ -18,7 +22,7 @@ export function PublisherList() {
 
   return (
     <div className='space-y-8'>
-      {publishers.map((publisher) => (
+      {publishers.map((publisher: PublisherListItem) => (
         <PublisherItem
           key={publisher._id}
           slug={publisher.slug ?? publisher._id}

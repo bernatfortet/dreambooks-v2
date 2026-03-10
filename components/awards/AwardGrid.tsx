@@ -3,10 +3,14 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { useQuery } from 'convex/react'
+import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
 
+type AwardListData = NonNullable<FunctionReturnType<typeof api.awards.queries.list>>
+type AwardListItem = AwardListData[number]
+
 export function AwardGrid() {
-  const awards = useQuery(api.awards.queries.list)
+  const awards: AwardListData | undefined = useQuery(api.awards.queries.list)
 
   if (awards === undefined) {
     return <AwardGridSkeleton />
@@ -22,7 +26,7 @@ export function AwardGrid() {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      {awards.map((award) => (
+      {awards.map((award: AwardListItem) => (
         <AwardCard
           key={award._id}
           id={award._id}
