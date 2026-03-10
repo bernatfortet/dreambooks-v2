@@ -276,11 +276,15 @@ async function updateExistingBook(
 
   if (hasCoverUpdates) {
     const existingCover = existingBook.cover ?? {}
+    const shouldPreserveMeasuredDimensions =
+      (existingCover.storageIdMedium || existingCover.storageIdFull) &&
+      (args.coverSourceUrl === undefined || args.coverSourceUrl === existingCover.sourceUrl)
+
     updates.cover = {
       ...existingCover,
       ...(args.coverSourceUrl !== undefined && { sourceUrl: args.coverSourceUrl }),
-      ...(args.coverWidth !== undefined && { width: args.coverWidth }),
-      ...(args.coverHeight !== undefined && { height: args.coverHeight }),
+      ...(!shouldPreserveMeasuredDimensions && args.coverWidth !== undefined && { width: args.coverWidth }),
+      ...(!shouldPreserveMeasuredDimensions && args.coverHeight !== undefined && { height: args.coverHeight }),
       ...(args.coverSourceFormat !== undefined && { sourceFormat: args.coverSourceFormat }),
       ...(args.coverSourceAsin !== undefined && { sourceAsin: args.coverSourceAsin }),
     }

@@ -1,4 +1,4 @@
-import { MASONRY_GAP, estimateTitleLines, getTextBlockHeight } from './constants'
+import { MASONRY_GAP, estimateTitleLines, getColumnWidth, getTextBlockHeight } from './constants'
 
 export type MasonryItem = {
   id: string
@@ -26,49 +26,54 @@ export function calculateMasonryLayout(
   columnCount: number,
   gap: number = MASONRY_GAP,
 ): MasonryLayout {
-  const columnWidth = (containerWidth - gap * (columnCount - 1)) / columnCount
+  const columnWidth = getColumnWidth(containerWidth, columnCount)
   const columnHeights = Array(columnCount).fill(0)
   const positions = new Map<string, Position>()
 
   for (const item of items) {
-    let minHeight = columnHeights[0]
-    let columnIndex = 0
-    for (let i = 1; i < columnCount; i++) {
-      if (columnHeights[i] < minHeight) {
-        minHeight = columnHeights[i]
-        columnIndex = i
-      }
-    }
-
-    // Guard against invalid dimensions - use 2:3 aspect ratio as fallback.
-    // Also clamp clearly-landscape "covers" (often Amazon spreads) so they don't
-    // collapse masonry cards into short landscape tiles.
-    const fallbackAspectRatio = 2 / 3
-    const rawWidth = item.coverWidth > 0 ? item.coverWidth : 200
-    const rawHeight = item.coverHeight > 0 ? item.coverHeight : 300
-    const rawAspectRatio = rawWidth / rawHeight
-
-    const landscapeThreshold = 1.05
-    const aspectRatio = rawAspectRatio > landscapeThreshold ? fallbackAspectRatio : rawAspectRatio
-    const imageHeight = columnWidth / aspectRatio
+    const coverWidth = item.coverWidth > 0 ? item.coverWidth : 200
+    const coverHeight = item.coverHeight > 0 ? item.coverHeight : 300
+    const aspectRatio = coverWidth / coverHeight
+    const placement = getPlacement(columnHeights)
+    const itemWidth = columnWidth
+    const imageHeight = itemWidth / aspectRatio
 
     // Dynamic text block height based on estimated title lines
-    const titleLines = estimateTitleLines(item.title, columnWidth)
+    const titleLines = estimateTitleLines(item.title, itemWidth)
     const textBlockHeight = getTextBlockHeight(titleLines)
     const cardHeight = imageHeight + textBlockHeight
 
     positions.set(item.id, {
-      x: columnIndex * (columnWidth + gap),
-      y: columnHeights[columnIndex],
-      width: columnWidth,
+      x: placement.columnIndex * (columnWidth + gap),
+      y: placement.y,
+      width: itemWidth,
       height: cardHeight,
       imageHeight,
     })
 
-    columnHeights[columnIndex] += cardHeight + gap
+    const nextColumnHeight = placement.y + cardHeight + gap
+    columnHeights[placement.columnIndex] = nextColumnHeight
   }
 
-  const containerHeight = Math.max(...columnHeights) - gap
+  const containerHeight = Math.max(...columnHeights, 0) - gap
 
   return { positions, containerHeight }
+}
+
+function getPlacement(columnHeights: number[]): { columnIndex: number; y: number } {
+  let bestColumnIndex = 0
+  let bestY = Number.POSITIVE_INFINITY
+
+  for (let startIndex = 0; startIndex < columnHeights.length; startIndex++) {
+    const y = columnHeights[startIndex]
+    if (y < bestY) {
+      bestY = y
+      bestColumnIndex = startIndex
+    }
+  }
+
+  return {
+    columnIndex: bestColumnIndex,
+    y: Number.isFinite(bestY) ? bestY : 0,
+  }
 }

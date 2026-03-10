@@ -1,16 +1,26 @@
-export const BREAKPOINTS = {
-  sm: 640,
-  md: 768,
-  lg: 1024,
-} as const
+export const MASONRY_GAP = 12
+const MIN_MASONRY_COLUMN_WIDTH = 180
+const TARGET_MASONRY_COLUMN_WIDTH = 240
+const MAX_MASONRY_COLUMN_WIDTH = 320
 
 export function getColumnCount(containerWidth: number): number {
-  if (containerWidth >= BREAKPOINTS.lg) return 6
-  if (containerWidth >= BREAKPOINTS.md) return 3
-  return 2
+  const minColumns = Math.max(1, Math.ceil((containerWidth + MASONRY_GAP) / (MAX_MASONRY_COLUMN_WIDTH + MASONRY_GAP)))
+  const maxColumns = Math.max(1, Math.floor((containerWidth + MASONRY_GAP) / (MIN_MASONRY_COLUMN_WIDTH + MASONRY_GAP)))
+  const targetColumns = Math.max(1, Math.round((containerWidth + MASONRY_GAP) / (TARGET_MASONRY_COLUMN_WIDTH + MASONRY_GAP)))
+
+  return clampColumnCount(targetColumns, minColumns, maxColumns)
 }
 
-export const MASONRY_GAP = 12
+export function getColumnWidth(containerWidth: number, columnCount: number): number {
+  const availableWidth = containerWidth - MASONRY_GAP * (columnCount - 1)
+  const columnWidth = availableWidth / columnCount
+
+  return Math.max(0, columnWidth)
+}
+
+function clampColumnCount(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max)
+}
 
 // Text block heights based on title lines
 // mb-2 (8px) + title lines (24px each) + author (20px)

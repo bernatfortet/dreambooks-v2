@@ -15,6 +15,7 @@ type BookMasonryCardProps = {
   style: React.CSSProperties
   imageHeight: number
   priority?: boolean
+  onImageMeasure?: (dimensions: { width: number; height: number }) => void
 }
 
 export function BookMasonryCard({
@@ -27,13 +28,15 @@ export function BookMasonryCard({
   style,
   imageHeight,
   priority = false,
+  onImageMeasure,
 }: BookMasonryCardProps) {
   const [isLoaded, setIsLoaded] = useState(false)
   const displayBadge = seriesPosition ? <BookCardBadge>#{seriesPosition}</BookCardBadge> : null
+  const imageSizes = typeof style.width === 'number' ? `${Math.round(style.width)}px` : style.width ?? '200px'
 
   return (
     <Link href={`/books/${slug}`} className='group block' style={style}>
-      <div className='relative rounded-md overflow-hidden mb-2' style={{ height: imageHeight }}>
+      <div className='relative rounded-md overflow-hidden mb-2 bg-muted' style={{ height: imageHeight }}>
         <div
           className='absolute inset-0 bg-muted transition-opacity duration-300'
           style={{ ...(dominantColor ? { backgroundColor: dominantColor } : {}), opacity: isLoaded ? 0 : 0.25 }}
@@ -44,12 +47,21 @@ export function BookMasonryCard({
             src={coverUrl}
             alt={title}
             fill
-            className={`object-cover group-hover:scale-105 transition-[transform,opacity] duration-300 ${
+            className={`object-contain group-hover:scale-105 transition-[transform,opacity] duration-300 ${
               isLoaded ? 'opacity-100' : 'opacity-0'
             }`}
-            sizes={`${Math.round((style.width as number) || 200)}px`}
+            sizes={imageSizes}
             priority={priority}
-            onLoadingComplete={() => setIsLoaded(true)}
+            onLoadingComplete={(image) => {
+              const naturalWidth = image.naturalWidth
+              const naturalHeight = image.naturalHeight
+
+              setIsLoaded(true)
+
+              if (naturalWidth > 0 && naturalHeight > 0) {
+                onImageMeasure?.({ width: naturalWidth, height: naturalHeight })
+              }
+            }}
           />
         ) : (
           <div className='w-full h-full flex items-center justify-center text-muted-foreground text-sm p-4 text-center'>
@@ -60,9 +72,9 @@ export function BookMasonryCard({
         {displayBadge}
       </div>
 
-      <h3 className='font-medium text-base line-clamp-2 group-hover:text-primary transition-colors'>{title}</h3>
+      <h3 className='font-medium text-[14px] line-clamp-2 group-hover:text-primary transition-colors'>{title}</h3>
 
-      {authors && authors.length > 0 && <p className='text-sm text-muted-foreground line-clamp-1'>{authors.join(', ')}</p>}
+      {authors && authors.length > 0 && <p className='text-[13px] text-muted-foreground line-clamp-1'>{authors.join(', ')}</p>}
     </Link>
   )
 }

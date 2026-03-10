@@ -8,11 +8,14 @@ import { Id } from '@/convex/_generated/dataModel'
 import type { BookFilters } from '../filters/types'
 import { BookMasonryCard } from './BookMasonryCard'
 import { calculateMasonryLayout, type MasonryItem } from './useMasonryLayout'
-import { getColumnCount, MASONRY_GAP } from './constants'
+import { getColumnCount, getColumnWidth, MASONRY_GAP } from './constants'
 
 function BookMasonrySkeleton({ count = 12 }: { count?: number }) {
   return (
-    <div className='grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3'>
+    <div
+      className='grid gap-3'
+      style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))' }}
+    >
       {Array.from({ length: count }).map((_, index) => (
         <div key={index} className='space-y-2'>
           <div className='aspect-2/3 bg-muted rounded-md animate-pulse' />
@@ -36,6 +39,11 @@ export type BookMasonryItem = {
   seriesPosition?: number | null
 }
 
+type MeasuredDimensions = {
+  width: number
+  height: number
+}
+
 type BookMasonryListProps = {
   books: BookMasonryItem[]
   className?: string
@@ -44,6 +52,7 @@ type BookMasonryListProps = {
 export function BookMasonryList({ books, className }: BookMasonryListProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState<number | null>(null)
+  const [measuredDimensionsById, setMeasuredDimensionsById] = useState<Record<string, MeasuredDimensions>>({})
 
   useLayoutEffect(() => {
     const container = containerRef.current
@@ -72,12 +81,12 @@ export function BookMasonryList({ books, className }: BookMasonryListProps) {
     const masonryItems: MasonryItem[] = books.map((book) => ({
       id: book._id,
       title: book.title,
-      coverWidth: book.coverWidth,
-      coverHeight: book.coverHeight,
+      coverWidth: measuredDimensionsById[book._id]?.width ?? book.coverWidth,
+      coverHeight: measuredDimensionsById[book._id]?.height ?? book.coverHeight,
     }))
 
     return calculateMasonryLayout(masonryItems, containerWidth, columnCount, MASONRY_GAP)
-  }, [containerWidth, books])
+  }, [containerWidth, books, measuredDimensionsById])
 
   if (books.length === 0) {
     return <p className='text-center text-muted-foreground py-12'>No books yet.</p>
@@ -92,10 +101,15 @@ export function BookMasonryList({ books, className }: BookMasonryListProps) {
   }
 
   const columnCount = getColumnCount(containerWidth)
+  const columnWidth = getColumnWidth(containerWidth, columnCount)
   const priorityCount = columnCount * 2
 
   return (
-    <div ref={containerRef} className={className} style={{ position: 'relative', height: layout.containerHeight }}>
+    <div
+      ref={containerRef}
+      className={className}
+      style={{ position: 'relative', height: layout.containerHeight, minHeight: columnWidth * 1.5 }}
+    >
       {books.map((book, index) => {
         const position = layout.positions.get(book._id)
         if (!position) return null
@@ -118,6 +132,19 @@ export function BookMasonryList({ books, className }: BookMasonryListProps) {
             }}
             imageHeight={position.imageHeight}
             priority={index < priorityCount}
+            onImageMeasure={(dimensions) => {
+              setMeasuredDimensionsById((current) => {
+                const existing = current[book._id]
+                if (existing && existing.width === dimensions.width && existing.height === dimensions.height) {
+                  return current
+                }
+
+                return {
+                  ...current,
+                  [book._id]: dimensions,
+                }
+              })
+            }}
           />
         )
       })}

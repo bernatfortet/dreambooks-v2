@@ -14,6 +14,8 @@ export const global = query({
         slug: v.union(v.string(), v.null()),
         authors: v.array(v.string()),
         coverUrl: v.union(v.string(), v.null()),
+        coverWidth: v.number(),
+        coverHeight: v.number(),
         seriesPosition: v.union(v.number(), v.null()),
       }),
     ),

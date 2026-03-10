@@ -1,8 +1,8 @@
 'use client'
 
-import { BookCard } from '@/components/books/BookCard'
+import type { ReactNode } from 'react'
+import { BookMasonryGrid, BookMasonryList, type BookMasonryItem } from '@/components/books/masonry'
 import type { BookFilters } from './filters/types'
-import { BookMasonryGrid } from './masonry'
 
 type BookItem = {
   _id: string
@@ -13,14 +13,19 @@ type BookItem = {
     url?: string | null
     width?: number
     height?: number
+    dominantColor?: string | null
   } | null
+  coverUrl?: string | null
+  coverWidth?: number
+  coverHeight?: number
+  dominantColor?: string | null
   seriesPosition?: number | null
 }
 
 const BOOK_GRID_CLASSES = 'grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3'
 
 type BookGridContainerProps = {
-  children: React.ReactNode
+  children: ReactNode
   className?: string
 }
 
@@ -34,20 +39,9 @@ type BookGridListProps = {
 }
 
 export function BookGridList({ books, className }: BookGridListProps) {
-  return (
-    <BookGridContainer className={className}>
-      {books.map((book) => (
-        <BookCard
-          key={book._id}
-          slug={book.slug ?? book._id}
-          title={book.title}
-          authors={book.authors}
-          coverUrl={book.cover?.url ?? null}
-          seriesPosition={book.seriesPosition}
-        />
-      ))}
-    </BookGridContainer>
-  )
+  const masonryBooks = books.map(normalizeBookForMasonry)
+
+  return <BookMasonryList books={masonryBooks} className={className} />
 }
 
 type BookGridProps = {
@@ -74,4 +68,21 @@ export function BookGridSkeleton({ count = 12 }: BookGridSkeletonProps) {
       ))}
     </BookGridContainer>
   )
+}
+
+function normalizeBookForMasonry(book: BookItem): BookMasonryItem {
+  const coverWidth = book.cover?.width ?? book.coverWidth ?? 200
+  const coverHeight = book.cover?.height ?? book.coverHeight ?? 300
+
+  return {
+    _id: book._id,
+    slug: book.slug,
+    title: book.title,
+    authors: book.authors,
+    coverUrl: book.cover?.url ?? book.coverUrl ?? null,
+    coverWidth,
+    coverHeight,
+    dominantColor: book.cover?.dominantColor ?? book.dominantColor ?? null,
+    seriesPosition: book.seriesPosition,
+  }
 }
