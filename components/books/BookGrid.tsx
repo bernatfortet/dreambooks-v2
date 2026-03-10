@@ -1,13 +1,8 @@
 'use client'
 
-import type { ReactNode } from 'react'
-import { usePaginatedQuery } from 'convex/react'
-import { api } from '@/convex/_generated/api'
-import { Button } from '@/components/ui/button'
 import { BookCard } from '@/components/books/BookCard'
-import { Id } from '@/convex/_generated/dataModel'
 import type { BookFilters } from './filters/types'
-import { BookMasonryGrid, BookMasonryList, type BookMasonryItem } from './masonry'
+import { BookMasonryGrid } from './masonry'
 
 type BookItem = {
   _id: string
@@ -39,18 +34,20 @@ type BookGridListProps = {
 }
 
 export function BookGridList({ books, className }: BookGridListProps) {
-  const masonryBooks: BookMasonryItem[] = books.map((book) => ({
-    _id: book._id,
-    slug: book.slug,
-    title: book.title,
-    authors: book.authors,
-    coverUrl: book.cover?.url ?? null,
-    coverWidth: book.cover?.width ?? 200,
-    coverHeight: book.cover?.height ?? 300,
-    seriesPosition: book.seriesPosition,
-  }))
-
-  return <BookMasonryList books={masonryBooks} className={className} />
+  return (
+    <BookGridContainer className={className}>
+      {books.map((book) => (
+        <BookCard
+          key={book._id}
+          slug={book.slug ?? book._id}
+          title={book.title}
+          authors={book.authors}
+          coverUrl={book.cover?.url ?? null}
+          seriesPosition={book.seriesPosition}
+        />
+      ))}
+    </BookGridContainer>
+  )
 }
 
 type BookGridProps = {
