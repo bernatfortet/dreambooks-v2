@@ -30,10 +30,11 @@ const client = new ConvexHttpClient(convexUrl)
 // Known bad image URLs that should be cleared
 const BAD_IMAGE_PATTERNS = ['Author_Store_Banner', 'author-cx', 'grey-pixel', 'transparent-pixel', 'amazon-avatars-global/default']
 
-function hasBadImage(author: { imageSourceUrl?: string | null }): boolean {
-  if (!author.imageSourceUrl) return false
+function hasBadImage(author: { image?: { sourceImageUrl?: string | null } | null }): boolean {
+  const sourceImageUrl = author.image?.sourceImageUrl
+  if (!sourceImageUrl) return false
 
-  return BAD_IMAGE_PATTERNS.some((pattern) => author.imageSourceUrl!.includes(pattern))
+  return BAD_IMAGE_PATTERNS.some((pattern) => sourceImageUrl.includes(pattern))
 }
 
 async function main() {
@@ -91,7 +92,7 @@ async function main() {
     const samples = authorsWithBadImages.slice(0, 20)
     for (const author of samples) {
       console.log(`     - ${author.name}`)
-      console.log(`       Current image: ${author.imageSourceUrl?.substring(0, 80)}...`)
+      console.log(`       Current image: ${author.image?.sourceImageUrl?.substring(0, 80)}...`)
       console.log('')
     }
 

@@ -45,7 +45,6 @@ export async function enrichBook(params: { book: BookToEnrich; page: Page; dryRu
 
     log(`   ✅ Parsed: ${bookData.title}`)
     log(`   Authors: ${bookData.authors?.join(', ') ?? 'Unknown'}`)
-    log(`   ISBN-13: ${bookData.isbn13 ?? 'N/A'}`)
 
     if (dryRun) {
       log(`   🏁 Would update (dry run)`)

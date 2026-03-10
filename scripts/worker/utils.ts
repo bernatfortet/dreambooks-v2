@@ -168,16 +168,23 @@ function formatErrorForLog(error: unknown): string {
 
 /**
  * Check if a book is targeted at a juvenile audience.
- * Amazon consistently shows age range or grade level for children's books.
- * If neither is present, the book is likely not juvenile.
+ * Returns true if any of the following conditions are met:
+ * - Has age range data (ageRangeMin/Max)
+ * - Has grade level data (gradeLevelMin/Max)
+ * - Has "Children's Books" in Amazon category breadcrumbs
  */
 export function isJuvenileBook(bookData: {
   ageRangeMin?: number | null
   ageRangeMax?: number | null
   gradeLevelMin?: number | null
   gradeLevelMax?: number | null
+  categories?: string[]
 }): boolean {
   const hasAgeRange = bookData.ageRangeMin != null || bookData.ageRangeMax != null
   const hasGradeLevel = bookData.gradeLevelMin != null || bookData.gradeLevelMax != null
-  return hasAgeRange || hasGradeLevel
+  const hasChildrensCategory = bookData.categories?.some(
+    (category) => category.toLowerCase().includes("children's books") || category.toLowerCase().includes("children's books"),
+  )
+
+  return hasAgeRange || hasGradeLevel || hasChildrensCategory === true
 }

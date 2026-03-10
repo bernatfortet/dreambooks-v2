@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 
 /**
- * Backfill author images for existing authors that have imageSourceUrl
- * but no imageStorageId.
+ * Backfill author images for existing authors that have `image.sourceImageUrl`
+ * but no stored image yet.
  *
  * Usage:
  *   bun scripts/backfill-author-images.ts            # Process 50 authors (default)

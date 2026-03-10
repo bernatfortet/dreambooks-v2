@@ -51,8 +51,14 @@ const mockBookData = {
   seriesName: 'Test Series',
   seriesUrl: 'https://www.amazon.com/gp/series/B012345678',
   seriesPosition: 1,
+  amazonRatingAverage: null,
+  amazonRatingCount: null,
+  goodreadsRatingAverage: null,
+  goodreadsRatingCount: null,
+  ratingScore: null,
   formats: [],
   editions: [],
+  categories: [],
 }
 
 const mockSeriesData = {

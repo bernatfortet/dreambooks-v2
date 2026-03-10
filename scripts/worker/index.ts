@@ -207,13 +207,21 @@ async function runWorkerLoop(config: WorkerConfig): Promise<void> {
       }
     }
 
-    // Wait before next poll
-    const waitTime = workDone ? config.pollInterval : config.pollInterval * idlePollMultiplier
-    console.log('')
-    console.log(`💤 Sleeping for ${waitTime}s...`)
-    console.log('')
-
-    await new Promise((resolve) => setTimeout(resolve, waitTime * 1000))
+    // When work was done, immediately check for more work (no sleep)
+    // When idle, wait before polling again
+    if (workDone) {
+      console.log('')
+      console.log('🔄 Work done, checking for more...')
+      console.log('')
+      // Minimal delay to avoid hammering the API
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+    } else {
+      const waitTime = config.pollInterval * idlePollMultiplier
+      console.log('')
+      console.log(`💤 Sleeping for ${waitTime}s...`)
+      console.log('')
+      await new Promise((resolve) => setTimeout(resolve, waitTime * 1000))
+    }
   }
 }
 

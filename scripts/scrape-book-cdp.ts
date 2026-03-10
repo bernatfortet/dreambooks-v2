@@ -303,7 +303,6 @@ async function scrapeSeriesBook(params: {
 
     console.log(`   Title: ${bookData.title}`)
     console.log(`   Authors: ${bookData.authors?.join(', ') ?? 'Unknown'}`)
-    console.log(`   ISBN-13: ${bookData.isbn13 ?? 'N/A'}`)
     console.log(`   Pages: ${bookData.pageCount ?? 'N/A'}`)
 
     if (dryRun) {
@@ -404,8 +403,6 @@ function printBookData(book: BookData): void {
   console.log(`  Subtitle: ${book.subtitle ?? 'N/A'}`)
   console.log(`  Authors: ${book.authors?.join(', ') ?? 'N/A'}`)
   console.log(`  ASIN: ${book.asin ?? 'N/A'}`)
-  console.log(`  ISBN-10: ${book.isbn10 ?? 'N/A'}`)
-  console.log(`  ISBN-13: ${book.isbn13 ?? 'N/A'}`)
   console.log(`  Publisher: ${book.publisher ?? 'N/A'}`)
   console.log(`  Published: ${book.publishedDate ?? 'N/A'}`)
   console.log(`  Pages: ${book.pageCount ?? 'N/A'}`)

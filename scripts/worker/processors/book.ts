@@ -1,5 +1,5 @@
 import type { Page } from 'playwright'
-import { parseBookFromPage, ensurePreferredFormat } from '@/lib/scraping/domains/book/parse'
+import { parseBookFromPage } from '@/lib/scraping/domains/book/parse'
 import { discoverBookLinks } from '@/lib/scraping/domains/book/discover'
 import { detectAmazonPageType } from '@/lib/scraping/utils/page-type-detector'
 import { navigateWithRetry } from '../browser'
@@ -23,7 +23,6 @@ type ProcessBookResult = {
 
 /**
  * Process a book URL from the queue.
- * Optionally scrapes the full series and all books in it.
  */
 export async function processBookFromQueue(params: { item: QueueItem; page: Page; dryRun: boolean }): Promise<ProcessBookResult> {
   const { item, page, dryRun } = params
@@ -32,7 +31,7 @@ export async function processBookFromQueue(params: { item: QueueItem; page: Page
   log(`📖 Processing book: ${truncate(item.url, 60)}`)
   log('─'.repeat(60))
 
-  // Navigate to book page
+  // Navigate to book page (may land on any format: hardcover, paperback, kindle, etc.)
   const navResult = await navigateWithRetry({ page, url: item.url })
   if (!navResult.success) {
     if (!dryRun) {
@@ -41,11 +40,8 @@ export async function processBookFromQueue(params: { item: QueueItem; page: Page
     return { success: false }
   }
 
-  // Upgrade to preferred format if available (hardcover > paperback > kindle)
-  await ensurePreferredFormat(page)
-
-  // Parse book data
-  const bookData = await parseBookFromPage(page, { scrapeEditions: true, maxEditions: 4 })
+  // Parse book data - edition scraping handles visiting all formats efficiently
+  const bookData = await parseBookFromPage(page, { scrapeEditions: true })
 
   if (!bookData.title) {
     log(`   ⚠️ Failed to extract title, checking if page is a series...`)
@@ -89,16 +85,16 @@ export async function processBookFromQueue(params: { item: QueueItem; page: Page
   }
 
   // Only enforce juvenile filter for discoveries.
-  // Manual user enqueues should be allowed even when Amazon lacks age/grade metadata.
+  // Manual user enqueues should be allowed even when Amazon lacks juvenile signals.
   if (item.source === 'discovery' && !isJuvenileBook(bookData)) {
-    log(`   ⏭️ Skipping non-juvenile book (no age/grade data)`)
+    log(`   ⏭️ Skipping non-juvenile book (no age/grade/children's category)`)
     if (!dryRun) {
-      await markQueueItemError(item._id, 'Non-juvenile book (no age/grade data)')
+      await markQueueItemError(item._id, "Non-juvenile book (no age/grade/children's category)")
     }
     return { success: false }
   }
   if (item.source === 'user' && !isJuvenileBook(bookData)) {
-    log(`   ⚠️ No age/grade data, but importing (manual enqueue)`)
+    log(`   ⚠️ No juvenile signals (age/grade/children's category), but importing (manual enqueue)`)
   }
 
   if (dryRun) {

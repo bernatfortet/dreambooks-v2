@@ -43,10 +43,15 @@ export async function importBookToConvex(params: {
   // Transform null values to undefined (Convex validators don't accept null)
   const cleanedData = {
     title: scrapedData.title,
-    subtitle: scrapedData.subtitle ?? undefined,
     authors: scrapedData.authors,
     amazonAuthorIds: scrapedData.amazonAuthorIds?.length ? scrapedData.amazonAuthorIds : undefined,
-    contributors: scrapedData.contributors?.length ? scrapedData.contributors : undefined,
+    contributors: scrapedData.contributors?.length
+      ? scrapedData.contributors.map((c) => ({
+          name: c.name,
+          amazonAuthorId: c.amazonAuthorId ?? undefined,
+          role: c.role,
+        }))
+      : undefined,
     isbn10: scrapedData.isbn10 ?? undefined,
     isbn13: scrapedData.isbn13 ?? undefined,
     asin: scrapedData.asin ?? undefined,
@@ -67,6 +72,12 @@ export async function importBookToConvex(params: {
     gradeLevelMin: scrapedData.gradeLevelMin ?? undefined,
     gradeLevelMax: scrapedData.gradeLevelMax ?? undefined,
     gradeLevel: scrapedData.gradeLevelRaw ?? undefined,
+    // Ratings (scraped, never displayed - used only for sorting)
+    amazonRatingAverage: scrapedData.amazonRatingAverage ?? undefined,
+    amazonRatingCount: scrapedData.amazonRatingCount ?? undefined,
+    goodreadsRatingAverage: scrapedData.goodreadsRatingAverage ?? undefined,
+    goodreadsRatingCount: scrapedData.goodreadsRatingCount ?? undefined,
+    ratingScore: scrapedData.ratingScore ?? undefined,
     seriesName: scrapedData.seriesName ?? undefined,
     seriesUrl: scrapedData.seriesUrl ?? undefined,
     seriesPosition: scrapedData.seriesPosition ?? undefined,

@@ -137,8 +137,6 @@ export async function updateBookFromEnrichment(bookId: Id<'books'>, data: Record
     bookId,
     amazonUrl,
     subtitle: data.subtitle ?? undefined,
-    isbn10: data.isbn10 ?? undefined,
-    isbn13: data.isbn13 ?? undefined,
     asin: data.asin ?? undefined,
     publisher: data.publisher ?? undefined,
     publishedDate: data.publishedDate ?? undefined,
@@ -204,6 +202,7 @@ export async function saveSeriesFromScrape(
     description?: string
     coverImageUrl?: string
     expectedBookCount?: number
+    discoveredBookCount?: number
     skipCoverDownload?: boolean
     scrapeVersion?: number
     books: Array<{

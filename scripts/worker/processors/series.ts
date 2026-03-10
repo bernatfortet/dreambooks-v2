@@ -179,12 +179,16 @@ export async function processSeriesFromQueue(params: ProcessSeriesParams): Promi
           authors: book.authors && book.authors.length > 0 ? book.authors : undefined,
         }))
 
+  // Count non-audiobook books as discovered (matches what we'd save if not using scrapeFullSeries)
+  const discoveredBookCount = seriesData.books.filter((book) => book.amazonUrl && book.format !== 'audiobook').length
+
   await saveSeriesFromScrape(seriesId, {
     seriesName: seriesData.name,
     sourceUrl: item.url,
     description: seriesData.description ?? undefined,
     coverImageUrl: seriesData.coverImageUrl ?? undefined,
     expectedBookCount: seriesData.totalBooks ?? undefined,
+    discoveredBookCount,
     skipCoverDownload: item.skipCoverDownload,
     scrapeVersion: SCRAPE_VERSIONS.series,
     books: booksForSave,
