@@ -8,6 +8,7 @@ import { api } from '@/convex/_generated/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { PageContainer } from '@/components/ui/PageContainer'
+import { getBookCoverDimensions, getBookCoverUrl, getBookCoverUrlFull } from '@/lib/book-cover'
 
 type BookPageProps = {
   params: Promise<{ slug: string }>
@@ -37,6 +38,7 @@ export default async function BookPage({ params }: BookPageProps) {
 
   if (!book) notFound()
 
+  const { coverUrl, coverUrlFull, coverWidth, coverHeight } = getResolvedBookCover(book)
   const metadataItems = getMetadataItems(book)
   const authorNames = getAuthorNames(book)
 
@@ -53,12 +55,12 @@ export default async function BookPage({ params }: BookPageProps) {
       <div className='grid gap-8 lg:grid-cols-[minmax(260px,320px)_minmax(0,1fr)]'>
         <aside className='space-y-4'>
           <div className='overflow-hidden rounded-xl border bg-muted'>
-            {book.coverUrlFull || book.coverUrl ? (
+            {coverUrlFull || coverUrl ? (
               <Image
-                src={book.coverUrlFull ?? book.coverUrl!}
+                src={coverUrlFull ?? coverUrl!}
                 alt={book.title}
-                width={book.coverWidth ?? 600}
-                height={book.coverHeight ?? 900}
+                width={coverWidth ?? 600}
+                height={coverHeight ?? 900}
                 className='h-auto w-full object-cover'
                 priority
               />
@@ -121,7 +123,14 @@ export default async function BookPage({ params }: BookPageProps) {
   )
 }
 
-type BookPageData = NonNullable<FunctionReturnType<typeof api.books.queries.getBySlugOrId>>
+type BookPageData = NonNullable<FunctionReturnType<typeof api.books.queries.getBySlugOrId>> & {
+  cover?: {
+    url?: string | null
+    urlFull?: string | null
+    width?: number | null
+    height?: number | null
+  } | null
+}
 type BookContributor = {
   name: string
   role: string
@@ -130,6 +139,19 @@ type BookContributor = {
 async function getBook(slugOrId: string) {
   const book = await fetchQuery(api.books.queries.getBySlugOrId, { slugOrId })
   return book
+}
+
+function getResolvedBookCover(book: BookPageData) {
+  const coverUrl = getBookCoverUrl(book)
+  const coverUrlFull = getBookCoverUrlFull(book)
+  const { width, height } = getBookCoverDimensions(book)
+
+  return {
+    coverUrl,
+    coverUrlFull,
+    coverWidth: width,
+    coverHeight: height,
+  }
 }
 
 function getAuthorNames(book: BookPageData) {

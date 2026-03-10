@@ -2,19 +2,20 @@
 
 import type { ReactNode } from 'react'
 import { usePaginatedQuery } from 'convex/react'
+import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
 import { Button } from '@/components/ui/button'
 import { BookCard } from '@/components/books/BookCard'
 import { Id } from '@/convex/_generated/dataModel'
+import { getBookCoverUrl } from '@/lib/book-cover'
 import type { BookFilters } from './filters/types'
 
-type BookItem = {
-  _id: string
-  slug?: string | null
-  title: string
-  authors: string[]
-  coverUrl: string | null
-  seriesPosition?: number | null
+type PaginatedBooks = NonNullable<FunctionReturnType<typeof api.books.queries.listPaginated>>
+type BookItem = PaginatedBooks['page'][number] & {
+  cover?: {
+    url?: string | null
+    urlThumb?: string | null
+  } | null
 }
 
 const BOOK_GRID_CLASSES = 'grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3'
@@ -46,7 +47,7 @@ export function BookGridList({ books, className }: BookGridListProps) {
           slug={book.slug ?? book._id}
           title={book.title}
           authors={book.authors}
-          coverUrl={book.coverUrl}
+          coverUrl={getBookCoverUrl(book)}
           seriesPosition={book.seriesPosition}
         />
       ))}
