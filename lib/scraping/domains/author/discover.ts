@@ -25,10 +25,8 @@ export function discoverAuthorLinks(data: AuthorData): Discovery[] {
   }
 
   // Book discoveries
-  // Cap to prevent queue floods (max 30 books per author scrape)
-  const cappedBooks = data.books.slice(0, 30)
-
-  for (const book of cappedBooks) {
+  // Keep all books found on the author page; queue mutation still applies a global cap.
+  for (const book of data.books) {
     if (book.amazonUrl) {
       discoveries.push({
         type: 'book',

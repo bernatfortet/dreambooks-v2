@@ -81,7 +81,7 @@ export function BadScrapeDialog({
         onClick={handleToggle}
         disabled={isLoading}
       >
-        {isLoading ? '...' : isBadScrape ? 'Clear Bad Flag' : 'Flag Bad Scrape'}
+        {isLoading ? '...' : isBadScrape ? 'Clear Bad Flag' : 'Flag for Review'}
       </Button>
 
       <Dialog
@@ -95,14 +95,14 @@ export function BadScrapeDialog({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Flag Bad Scrape</DialogTitle>
+            <DialogTitle>Flag Bad Scrape for Review</DialogTitle>
             <DialogDescription>
-              Add notes about why this scrape is bad (optional). Press ESC to cancel.
+              Add notes about what looks wrong. This only marks the item for triage and does not re-scrape it automatically.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <Textarea
-              placeholder="e.g., Missing cover image, incorrect description, wrong series information..."
+              placeholder="e.g., Missing cover image, wrong author link, incomplete series list..."
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
               autoFocus

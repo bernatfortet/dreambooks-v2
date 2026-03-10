@@ -21,13 +21,18 @@ function parseArgs(): DemoFlowConfig {
     process.exit(0)
   }
 
+  const bookUrl = parseStringFlag(args, '--book-url')
+  const seriesUrl = parseStringFlag(args, '--series-url')
+  const authorUrl = parseStringFlag(args, '--author-url')
+  const hasExplicitUrls = Boolean(bookUrl || seriesUrl || authorUrl)
+
   return {
     dryRun: args.includes('--dry-run'),
     headless: parseHeadlessArg(args),
     source: LOCAL_SCRAPE_SOURCES.crawlee ?? DEFAULT_LOCAL_SCRAPE_SOURCE,
-    bookUrl: parseStringFlag(args, '--book-url') ?? DEMO_URLS.book,
-    seriesUrl: parseStringFlag(args, '--series-url') ?? DEMO_URLS.series,
-    authorUrl: parseStringFlag(args, '--author-url') ?? DEMO_URLS.author,
+    bookUrl: hasExplicitUrls ? bookUrl ?? undefined : DEMO_URLS.book,
+    seriesUrl: hasExplicitUrls ? seriesUrl ?? undefined : DEMO_URLS.series,
+    authorUrl: hasExplicitUrls ? authorUrl ?? undefined : DEMO_URLS.author,
   }
 }
 
@@ -59,10 +64,14 @@ Usage:
 Options:
   --dry-run                 Parse pages without saving to Convex
   --headless=true|false     Run Playwright headless (default: true)
-  --book-url=URL            Override the demo book URL
-  --series-url=URL          Override the demo series URL
-  --author-url=URL          Override the demo author URL
+  --book-url=URL            Include a book URL
+  --series-url=URL          Include a series URL
+  --author-url=URL          Include an author URL
   --help, -h                Show this help
+
+Behavior:
+  If no URL flags are provided, the demo runs the default book, series, and author URLs.
+  If any URL flag is provided, only the provided URLs are processed.
 
 Defaults:
   Book:   ${DEMO_URLS.book}

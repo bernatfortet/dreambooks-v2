@@ -13,6 +13,12 @@ Unified scraping workflow that accepts natural language input to control what an
 - User wants to add a book, series, or author from Amazon
 - User wants control over how much cascading happens (e.g., "just the book", "full series")
 
+## Execution Mode
+
+- If the user explicitly says `crawlee`, use the Crawlee flow.
+- Otherwise, default to browser automation with `agent-browser`.
+- Treat `crawlee` as an execution hint, not part of the entity name.
+
 ## Input Parsing
 
 ### Step 1: Extract URL
@@ -22,7 +28,15 @@ Look for Amazon URLs in the user's input:
 - Series: Contains `/dp/` with ASIN starting with B (e.g., `amazon.com/dp/B08911B14Q`)
 - Author: Contains `/stores/` or `/e/` (e.g., `amazon.com/stores/author/B000APNG74`)
 
-If no URL found, ask the user for one.
+If no URL is present, resolve the Amazon URL from the provided name or description.
+
+### Step 1b: Resolve by Name When Needed
+
+- For author requests like `author Brian Floca`, search Amazon for the author's page first.
+- Default path: use `agent-browser` to search Amazon and resolve the best URL.
+- Prefer canonical author URLs containing `/e/` or `/stores/author/`.
+- If the user explicitly says `crawlee`, still resolve the URL first, then pass the resolved URL into the Crawlee flow.
+- If the search returns multiple plausible results, ask the user to confirm before importing.
 
 ### Step 2: Detect URL Type
 
@@ -69,12 +83,16 @@ Note: Series and some Kindle books both use B-prefix ASINs. Default to "series" 
 | minimal | true |
 | full | false |
 
+Default behavior for author-name requests:
+- When the user says an author name like `Brian Floca` without asking for a broader crawl, scope the run to the author page plus the books directly visible on that page.
+- Do not fan out from those discovered books into co-authors, related authors, or series-driven book expansion unless the user explicitly asks for a fuller crawl.
+
 ## Execution Steps
 
 ### Step 1: Enqueue the URL
 
 ```bash
-npx convex run scrapeQueue/mutations:enqueue '{
+bunx convex run scrapeQueue/mutations:enqueue '{
   "url": "<URL>",
   "type": "<book|series|author>",
   "scrapeFullSeries": <true|false>,
@@ -91,6 +109,14 @@ bun worker --until-idle=1
 ```
 
 This runs the worker and exits after 1 consecutive idle poll (when all work is done).
+
+### Alternative: Crawlee Execution
+
+If the user explicitly says `crawlee`, skip queue + worker and run the local Crawlee flow with the resolved URL instead.
+
+- For author-only runs, provide the author URL via `--author-url`
+- Use `--dry-run` when the user asks to inspect first without saving
+- Keep the browser path as the default for non-`crawlee` requests
 
 Wait for the command to complete. The worker will:
 1. Process the queued URL
@@ -158,6 +184,26 @@ User: `/scrape this author completely https://amazon.com/stores/author/B000APNG7
 4. Run: `bun worker --until-idle=1`
 5. Report: "Created 1 author, discovered 12 books"
 
+### Example 5: Author by name, default browser path
+
+User: `/scrape author Brian Floca`
+
+1. Detect: author request by name
+2. Resolve the Amazon author URL with `agent-browser`
+3. Enqueue the resolved URL with `type: "author"`
+4. Run: `bun worker --until-idle=1`
+5. Keep the import scoped to Brian Floca and the books directly shown on that author page
+6. Report the resolved author URL and import result
+
+### Example 6: Author by name with Crawlee
+
+User: `/scrape crawlee author Brian Floca`
+
+1. Detect: author request by name with `crawlee` execution hint
+2. Resolve the Amazon author URL first
+3. Run the Crawlee author flow with that URL
+4. Report the resolved URL and import result
+
 ## Error Handling
 
 - **Invalid URL**: Ask user to provide a valid Amazon URL
@@ -180,3 +226,4 @@ User: `/scrape this author completely https://amazon.com/stores/author/B000APNG7
 - Worker logs are written to `worker-logs.txt` in project root
 - Use the `inspect-worker-logs` skill for detailed log analysis
 - Use the `debug-scraping` skill if something went wrong during scraping
+- Use `agent-browser` by default for URL discovery when the user gives only a name

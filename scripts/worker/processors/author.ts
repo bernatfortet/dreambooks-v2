@@ -10,6 +10,7 @@ type ProcessAuthorResult = {
   success: boolean
   authorId?: string
   seriesAdded?: number
+  booksDiscovered?: number
   booksLinked?: number
 }
 
@@ -108,14 +109,10 @@ export async function processAuthorFromQueue(params: { item: QueueItem; page: Pa
     return { success: false }
   }
 
-  // Extract discoveries and queue them (respecting skip options)
-  // For authors, skipBookDiscoveries means "don't queue any new series/books from this author"
-  // TEMPORARILY DISABLED: All queueing is deactivated for author scraping
-  // TODO: Re-enable when needed
-  /*
   const skipDiscoveries = item.skipBookDiscoveries
 
   let seriesAdded = 0
+  let booksDiscovered = 0
 
   if (skipDiscoveries) {
     log(`   ⏭️ Skipping discoveries (skipBookDiscoveries=true)`)
@@ -134,13 +131,9 @@ export async function processAuthorFromQueue(params: { item: QueueItem; page: Pa
       }
 
       seriesAdded = seriesCount
+      booksDiscovered = bookCount
     }
   }
-  */
-
-  // Queueing disabled - set seriesAdded to 0
-  let seriesAdded = 0
-  log(`   ⏭️ Queueing disabled (all discoveries skipped)`)
 
   // Mark queue item complete
   await markQueueItemComplete({
@@ -153,5 +146,5 @@ export async function processAuthorFromQueue(params: { item: QueueItem; page: Pa
   log('─'.repeat(60))
   log('')
 
-  return { success: true, authorId, seriesAdded, booksLinked }
+  return { success: true, authorId, seriesAdded, booksDiscovered, booksLinked }
 }

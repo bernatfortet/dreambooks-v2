@@ -71,6 +71,7 @@ async function scrapeBookWithFirecrawl(url: string): Promise<ScrapeResult<BookDa
     asin: result.data.asin ?? null,
     publisher: result.data.publisher ?? null,
     publishedDate: result.data.publishedDate ?? null,
+    language: null,
     pageCount: result.data.pageCount ?? null,
     description: result.data.description ?? null,
     coverImageUrl: result.data.coverImageUrl ?? null,

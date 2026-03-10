@@ -236,8 +236,12 @@ function isValidAuthorImageUrl(url: string): boolean {
     }
   }
 
-  // Must be an actual image URL (usually from media-amazon.com/images/I/)
-  if (!url.includes('media-amazon.com/images/I/')) {
+  const isProductImage = url.includes('media-amazon.com/images/I/')
+  const isAuthorMediaImage = url.includes('media-amazon.com/images/S/amzn-author-media-prod/')
+
+  // Accept real author portraits from Amazon's author-media CDN in addition to
+  // standard product-image URLs.
+  if (!isProductImage && !isAuthorMediaImage) {
     console.log(`   Skipping non-product image URL: ${url.substring(0, 60)}...`)
     return false
   }

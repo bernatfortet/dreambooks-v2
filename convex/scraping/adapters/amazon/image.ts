@@ -85,8 +85,10 @@ export function toAmazonImageLongestSide(url: string, px: number): string {
   if (sized !== url) return sized
 
   // Some Amazon image URLs have no size suffix at all. In that case, insert one
-  // before the file extension: .../images/I/FILE.jpg -> .../images/I/FILE._SL400_.jpg
-  const extensionMatch = url.match(/(\/images\/I\/[^?#]+?)(\.(?:jpe?g|png|webp|gif))([?#].*)?$/i)
+  // before the file extension for both product images and author-media images:
+  // .../images/I/FILE.jpg -> .../images/I/FILE._SL400_.jpg
+  // .../images/S/FILE.jpg -> .../images/S/FILE._SL400_.jpg
+  const extensionMatch = url.match(/(\/images\/[A-Z]\/[^?#]+?)(\.(?:jpe?g|png|webp|gif))([?#].*)?$/i)
   if (!extensionMatch) return url
 
   const base = extensionMatch[1]

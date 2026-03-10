@@ -2,7 +2,7 @@ import type { Page } from 'playwright'
 
 import type { PageManager } from '../browser'
 import { humanDelay, getWorkerId, startItemLog, finishItemLog, log, logError } from '../utils'
-import { fetchPendingQueueItems, claimQueueItem } from '../convex'
+import { fetchPendingQueueItems, claimQueueItem, markQueueItemError } from '../convex'
 import { processBookFromQueue } from '../processors/book'
 import { processSeriesFromQueue } from '../processors/series'
 import { processAuthorFromQueue } from '../processors/author'
@@ -46,6 +46,10 @@ export async function processQueueFlow(params: { page: Page; pageManager?: PageM
       }
     }
 
+    // Count a claimed item as progress so the worker immediately re-polls
+    // after clearing errors instead of sleeping as if it were idle.
+    workDone = true
+
     await humanDelay(2000, 4000, 'Preparing next item')
 
     startItemLog()
@@ -70,11 +74,18 @@ export async function processQueueFlow(params: { page: Page; pageManager?: PageM
         success = result.success
         if (result.success) {
           workDone = true
-          log(`   📊 Linked ${result.booksLinked ?? 0} book(s), queued ${result.seriesAdded ?? 0} series`)
+          log(
+            `   📊 Linked ${result.booksLinked ?? 0} book(s), discovered ${result.booksDiscovered ?? 0} books and ${result.seriesAdded ?? 0} series`,
+          )
         }
       }
     } catch (error) {
       logError('   🚨 Queue item crashed', error)
+
+      if (!dryRun) {
+        const message = error instanceof Error ? error.message : 'Unknown queue processing error'
+        await markQueueItemError(item._id, message)
+      }
     } finally {
       finishItemLog(itemType, item.url, success, item.referrerUrl, item.referrerReason)
     }

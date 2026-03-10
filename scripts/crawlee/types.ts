@@ -10,9 +10,9 @@ export type DemoFlowConfig = {
   dryRun: boolean
   headless: boolean
   source: LocalScrapeSource
-  bookUrl: string
-  seriesUrl: string
-  authorUrl: string
+  bookUrl?: string
+  seriesUrl?: string
+  authorUrl?: string
 }
 
 export type DemoRunResult = {

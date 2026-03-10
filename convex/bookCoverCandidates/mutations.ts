@@ -1,5 +1,6 @@
 import { internalMutation, mutation } from '../_generated/server'
 import { internal } from '../_generated/api'
+import type { Doc, Id } from '../_generated/dataModel'
 import { v } from 'convex/values'
 
 /**
@@ -84,25 +85,13 @@ export const selectCandidate = mutation({
       source: candidate.source,
     })
 
-    // Build nested cover object, preserving existing storage IDs
-    const existingCover = book.cover ?? {}
-    const cover = {
-      ...existingCover,
-      sourceUrl: candidate.imageUrl,
-      sourceAsin: candidate.editionId ? undefined : existingCover.sourceAsin,
+    await applySelectedCover(context, {
+      bookId: candidate.bookId,
+      book,
+      imageUrl: candidate.imageUrl,
+      editionId: candidate.editionId,
       width: candidate.width,
       height: candidate.height,
-    }
-
-    await context.db.patch(candidate.bookId, {
-      coverStatus: 'pending',
-      cover,
-    })
-
-    // Schedule cover download
-    await context.scheduler.runAfter(0, internal.scraping.downloadCover.downloadCover, {
-      bookId: candidate.bookId,
-      sourceUrl: candidate.imageUrl,
     })
 
     return {
@@ -191,24 +180,13 @@ export const selectCoverFromUrl = mutation({
       source: args.source,
     })
 
-    // Build nested cover object, preserving existing storage IDs
-    const existingCover = book.cover ?? {}
-    const cover = {
-      ...existingCover,
-      sourceUrl: args.imageUrl,
+    await applySelectedCover(context, {
+      bookId: args.bookId,
+      book,
+      imageUrl: args.imageUrl,
+      editionId: args.editionId ?? candidate.editionId,
       width: candidate.width,
       height: candidate.height,
-    }
-
-    await context.db.patch(args.bookId, {
-      coverStatus: 'pending',
-      cover,
-    })
-
-    // Schedule cover download
-    await context.scheduler.runAfter(0, internal.scraping.downloadCover.downloadCover, {
-      bookId: args.bookId,
-      sourceUrl: args.imageUrl,
     })
 
     return {
@@ -240,3 +218,72 @@ export const deleteByBookId = internalMutation({
     return candidates.length
   },
 })
+
+async function getCoverSourceMetadata(
+  context: Parameters<typeof selectCandidate.handler>[0],
+  editionId: string | undefined,
+): Promise<{ sourceAsin?: string; sourceFormat?: string }> {
+  if (!editionId) return {}
+
+  const edition = await context.db.get(editionId)
+  if (!edition) return {}
+
+  return {
+    sourceAsin: edition.sourceId,
+    sourceFormat: edition.format,
+  }
+}
+
+async function applySelectedCover(
+  context: Parameters<typeof selectCandidate.handler>[0],
+  params: {
+    bookId: Id<'books'>
+    book: Doc<'books'>
+    imageUrl: string
+    editionId: Id<'bookEditions'> | undefined
+    width: number | undefined
+    height: number | undefined
+  },
+): Promise<void> {
+  const coverSourceMetadata = await getCoverSourceMetadata(context, params.editionId)
+  const cover = buildSelectedCover({
+    existingCover: params.book.cover,
+    imageUrl: params.imageUrl,
+    width: params.width,
+    height: params.height,
+    coverSourceMetadata,
+  })
+
+  await context.db.patch(params.bookId, {
+    coverStatus: 'pending',
+    cover,
+  })
+
+  await context.scheduler.runAfter(0, internal.scraping.downloadCover.downloadCover, {
+    bookId: params.bookId,
+    sourceUrl: params.imageUrl,
+  })
+}
+
+function buildSelectedCover(params: {
+  existingCover: Record<string, unknown> | undefined
+  imageUrl: string
+  width: number | undefined
+  height: number | undefined
+  coverSourceMetadata: { sourceAsin?: string; sourceFormat?: string }
+}) {
+  const existingCover = params.existingCover ?? {}
+
+  return {
+    ...existingCover,
+    sourceUrl: params.imageUrl,
+    ...(params.coverSourceMetadata.sourceAsin !== undefined && {
+      sourceAsin: params.coverSourceMetadata.sourceAsin,
+    }),
+    ...(params.coverSourceMetadata.sourceFormat !== undefined && {
+      sourceFormat: params.coverSourceMetadata.sourceFormat,
+    }),
+    width: params.width,
+    height: params.height,
+  }
+}

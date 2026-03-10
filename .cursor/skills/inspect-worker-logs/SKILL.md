@@ -28,12 +28,12 @@ Read worker-logs.txt with offset from end
 
 ### Search for Specific Items
 
-Use Grep to find specific books, series, or failures:
+Use `rg` to find specific books, series, or failures:
 
 ```
-Grep "FAILED" in worker-logs.txt
-Grep "ASIN_HERE" in worker-logs.txt
-Grep "SERIES:" in worker-logs.txt
+rg "FAILED" worker-logs.txt
+rg "ASIN_HERE" worker-logs.txt
+rg "SERIES:" worker-logs.txt
 ```
 
 ### Full Log
@@ -76,8 +76,8 @@ Time: 2026-01-19T18:30:00.000Z | Duration: 12.3s | SUCCESS
 When the user asks about worker logs:
 
 1. **"What just happened?"** - Read the last ~200 lines to see recent items
-2. **"Show me failures"** - Grep for "FAILED" first
-3. **"Find book X"** - Grep for the ASIN or title
+2. **"Show me failures"** - Search for "FAILED" first
+3. **"Find book X"** - Search for the ASIN or title
 4. **"Show all activity"** - Read the full file (warn user it may be long)
 
 ## Combining with Debug Skill
@@ -90,7 +90,7 @@ bun scripts/debug.ts inspect book --asin 1234567890
 
 ## Notes
 
-- The log file is located at `worker-logs.txt` in the project root
+- The log file is written to `worker-logs.txt` in the worker's current working directory, which is typically the project root
 - The last 20 items are kept (rolling buffer)
 - Logs are written after each item completes
 - If the worker hasn't processed anything yet, the file won't exist

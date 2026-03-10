@@ -3,9 +3,9 @@
 import { useState } from 'react'
 import { useQuery, useAction } from 'convex/react'
 import { api } from '@/convex/_generated/api'
-import { Id } from '@/convex/_generated/dataModel'
 import type { FunctionReturnType } from 'convex/server'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { BadScrapeDialog } from '@/components/admin/BadScrapeDialog'
 import { RescrapeDialog } from '@/components/admin/RescrapeDialog'
@@ -37,16 +37,15 @@ export function BookAdminPanel({ book }: BookAdminPanelProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const editionsQuery = (api as any)['bookEditions/queries']?.listByBookId
 
-  const editions = useQuery(editionsQuery, bookId ? { bookId } : 'skip') as Edition[] | undefined
+  const editions = useQuery(editionsQuery, { bookId }) as Edition[] | undefined
 
   async function handleRefreshCover() {
     setIsRefreshing(true)
 
     try {
       await refreshCover({ bookId })
-    } catch (err) {
-      // Error handling can be added here if needed
-      console.error('Failed to refresh cover:', err)
+    } catch (error) {
+      console.error('Failed to refresh cover', error)
     } finally {
       setIsRefreshing(false)
     }
@@ -55,10 +54,16 @@ export function BookAdminPanel({ book }: BookAdminPanelProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Book Admin</CardTitle>
+        <div className='flex items-center gap-2'>
+          <CardTitle>Book Admin</CardTitle>
+          {book.badScrape && <Badge variant='destructive'>Bad Scrape</Badge>}
+        </div>
       </CardHeader>
       <CardContent className='space-y-4'>
-        {/* Admin Actions */}
+        {book.badScrape && book.badScrapeNotes && (
+          <div className='text-sm text-destructive bg-destructive/10 p-2 rounded'>{book.badScrapeNotes}</div>
+        )}
+
         <div className='flex items-center gap-2 flex-wrap'>
           <BadScrapeDialog entityType='book' entityId={bookId} isBadScrape={!!book.badScrape} />
 
@@ -81,7 +86,6 @@ export function BookAdminPanel({ book }: BookAdminPanelProps) {
 
         {editions && <BookEditionsList editions={editions} primaryEditionId={book.primaryEditionId} />}
 
-        {/* Ratings (for admin/debugging - not displayed in public UI) */}
         <div className='space-y-2'>
           <h3 className='text-sm font-semibold'>Ratings</h3>
           <div className='grid grid-cols-2 gap-4 text-sm'>

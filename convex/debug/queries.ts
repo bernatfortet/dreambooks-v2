@@ -81,6 +81,51 @@ export const inspectBook = query({
 })
 
 /**
+ * Get full series data for debugging (includes scrape runs and artifacts).
+ */
+export const inspectSeries = query({
+  args: {
+    id: v.id('series'),
+  },
+  handler: async (context, args) => {
+    const series = await context.db.get(args.id)
+    if (!series) return null
+
+    const coverUrl = series.coverStorageId ? await context.storage.getUrl(series.coverStorageId) : null
+
+    const [scrapeRuns, artifacts] = await Promise.all([
+      context.db
+        .query('seriesScrapeRuns')
+        .withIndex('by_seriesId', (q) => q.eq('seriesId', args.id))
+        .order('desc')
+        .take(5),
+      context.db
+        .query('scrapeArtifacts')
+        .withIndex('by_entityId', (q) => q.eq('entityId', args.id))
+        .order('desc')
+        .take(5),
+    ])
+
+    const parsedArtifacts = artifacts.map((artifact) => ({
+      _id: artifact._id,
+      adapter: artifact.adapter,
+      scrapeVersion: artifact.scrapeVersion,
+      createdAt: artifact.createdAt,
+      payload: safeParseJson(artifact.payloadJson),
+    }))
+
+    return {
+      entity: {
+        ...series,
+        coverUrl,
+      },
+      scrapeRuns,
+      artifacts: parsedArtifacts,
+    }
+  },
+})
+
+/**
  * Sample books to check filter data formats
  */
 export const sampleFilterData = query({

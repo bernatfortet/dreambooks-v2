@@ -2,6 +2,8 @@ import { runCrawlerRequests } from '../crawler'
 import type { DemoFlowConfig, DemoRunResult } from '../types'
 
 export async function runDemoFlow(config: DemoFlowConfig): Promise<DemoRunResult[]> {
+  const requests = createDemoRequests(config)
+
   console.log('')
   console.log('═'.repeat(60))
   console.log('🕷️ CRAWLEE AMAZON DEMO')
@@ -9,13 +11,14 @@ export async function runDemoFlow(config: DemoFlowConfig): Promise<DemoRunResult
   console.log(`   Dry run: ${config.dryRun}`)
   console.log(`   Headless: ${config.headless}`)
   console.log(`   Source: ${config.source}`)
-  console.log(`   Book URL: ${config.bookUrl}`)
-  console.log(`   Series URL: ${config.seriesUrl}`)
-  console.log(`   Author URL: ${config.authorUrl}`)
+  console.log(`   Requests: ${requests.length}`)
+  if (config.bookUrl) console.log(`   Book URL: ${config.bookUrl}`)
+  if (config.seriesUrl) console.log(`   Series URL: ${config.seriesUrl}`)
+  if (config.authorUrl) console.log(`   Author URL: ${config.authorUrl}`)
   console.log('')
 
   const results = await runCrawlerRequests({
-    requests: createDemoRequests(config),
+    requests,
     dryRun: config.dryRun,
     headless: config.headless,
     source: config.source,
@@ -27,23 +30,33 @@ export async function runDemoFlow(config: DemoFlowConfig): Promise<DemoRunResult
 }
 
 function createDemoRequests(config: DemoFlowConfig) {
-  return [
-    {
+  const requests = []
+
+  if (config.bookUrl) {
+    requests.push({
       url: config.bookUrl,
       uniqueKey: `book:${config.bookUrl}`,
       userData: { type: 'book' as const },
-    },
-    {
+    })
+  }
+
+  if (config.seriesUrl) {
+    requests.push({
       url: config.seriesUrl,
       uniqueKey: `series:${config.seriesUrl}`,
       userData: { type: 'series' as const },
-    },
-    {
+    })
+  }
+
+  if (config.authorUrl) {
+    requests.push({
       url: config.authorUrl,
       uniqueKey: `author:${config.authorUrl}`,
       userData: { type: 'author' as const },
-    },
-  ]
+    })
+  }
+
+  return requests
 }
 
 function printSummary(results: DemoRunResult[]): void {

@@ -103,12 +103,9 @@ async function handleInspect(type: string, args: string[]) {
 
     console.log(`\n🔍 Inspecting series: ${seriesId}\n`)
 
-    // TODO: inspectSeries query doesn't exist yet
-    // const result = await client.query(api.debug.queries.inspectSeries, {
-    //   id: seriesId as Id<'series'>,
-    // })
-    console.log('⚠️  inspectSeries query not yet implemented')
-    const result = null
+    const result = await client.query(api.debug.queries.inspectSeries, {
+      id: seriesId as Id<'series'>,
+    })
 
     if (!result) {
       console.error('Series not found')

@@ -64,6 +64,7 @@ export async function parseBookFromPage(page: Page, options: ParseBookOptions = 
   const { names: authors, amazonAuthorIds, contributors } = await extractAuthors(page)
   const { isbn10, isbn13 } = await extractIsbns(page)
   const { publisher, publishedDate } = await extractPublisherInfo(page)
+  const language = await extractLanguage(page)
   const pageCount = await extractPageCount(page)
   const description = await extractDescription(page)
   const formats = await extractFormats(page)
@@ -102,7 +103,7 @@ export async function parseBookFromPage(page: Page, options: ParseBookOptions = 
     editions = await scrapeEditionPages(page, formats, maxEditions)
   }
 
-  // Try to get a better cover from Kindle edition (best-effort, fail-open)
+  // Try to get a better cover from the best available non-audiobook edition (best-effort, fail-open)
   // Skip if we already scraped editions (we have cover URLs from there)
   if (!scrapeEditions) {
     const betterCover = await selectBestCoverSource(page, formats, currentFormat)
@@ -148,6 +149,7 @@ export async function parseBookFromPage(page: Page, options: ParseBookOptions = 
     asin,
     publisher,
     publishedDate,
+    language,
     pageCount,
     description,
     coverImageUrl,
@@ -179,6 +181,7 @@ export async function parseBookFromPage(page: Page, options: ParseBookOptions = 
     title: bookData.title,
     contributors: bookData.contributors.map((c) => `${c.name} (${c.role})`),
     seriesName: bookData.seriesName,
+    language: bookData.language,
     formats: bookData.formats.map((f) => f.type),
     editions: bookData.editions.length,
     coverSourceFormat: bookData.coverSourceFormat,
@@ -463,6 +466,11 @@ async function extractPageCount(page: Page): Promise<number | null> {
 
   const match = pagesRaw.match(/(\d+)\s+pages/i)
   return match ? parseInt(match[1], 10) : null
+}
+
+async function extractLanguage(page: Page): Promise<string | null> {
+  const language = await extractDetailValue(page, 'Language')
+  return language?.trim() ?? null
 }
 
 async function extractDescription(page: Page): Promise<string | null> {
@@ -1115,7 +1123,7 @@ async function detectCurrentFormat(page: Page): Promise<string> {
 
 /**
  * Select the best cover source from available formats.
- * Navigates to the preferred format (Kindle > paperback > hardcover) and extracts cover.
+ * Navigates to the preferred format (hardcover > paperback > board book/library binding/spiral > kindle > audiobook) and extracts cover.
  *
  * FAIL-OPEN: If navigation or extraction fails, returns null (caller keeps current cover).
  * This function should NEVER throw or fail the overall book scrape.

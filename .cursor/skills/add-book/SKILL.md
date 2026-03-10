@@ -19,6 +19,12 @@ This skill guides you through adding a new book to the Dreambooks database.
 1. **Amazon URL**: Direct URL to an Amazon book page (e.g., `https://www.amazon.com/dp/ASIN`)
 2. **Book Name/Title**: Text search that requires finding the book first
 
+## Execution Mode
+
+- If the user explicitly says `crawlee`, use the Crawlee flow.
+- Otherwise, default to browser automation with `agent-browser`.
+- Treat `crawlee` as an execution hint, not part of the book title.
+
 ## Workflow
 
 ### Step 1: Input Resolution
@@ -30,9 +36,11 @@ This skill guides you through adding a new book to the Dreambooks database.
 
 **If name provided (TODO - v1):**
 
-- Search Amazon for the book (not yet implemented)
-- Present options to user for confirmation
-- Get URL from selected result
+- Search Amazon for the book
+- Default path: use `agent-browser` to resolve the best Amazon product URL
+- Prefer canonical product URLs containing `/dp/`
+- If there are multiple plausible matches, present the top options to the user for confirmation
+- Get the resolved Amazon URL from the selected result
 
 ### Step 2: Check for Duplicates
 
