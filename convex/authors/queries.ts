@@ -102,6 +102,8 @@ export const listWithTopBooks = query({
           slug: v.union(v.string(), v.null()),
           title: v.string(),
           coverUrl: v.union(v.string(), v.null()),
+          coverWidth: v.union(v.number(), v.null()),
+          coverHeight: v.union(v.number(), v.null()),
         }),
       ),
     }),
@@ -132,6 +134,8 @@ export const listWithTopBooks = query({
               slug: book.slug,
               title: book.title,
               coverUrl,
+              coverWidth: book.cover?.width ?? null,
+              coverHeight: book.cover?.height ?? null,
             }
           }),
         )
