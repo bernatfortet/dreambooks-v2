@@ -19,6 +19,7 @@ export const global = query({
         coverUrl: v.union(v.string(), v.null()),
         coverWidth: v.number(),
         coverHeight: v.number(),
+        blurHash: v.union(v.string(), v.null()),
         seriesPosition: v.union(v.number(), v.null()),
       }),
     ),

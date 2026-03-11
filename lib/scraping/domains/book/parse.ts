@@ -1,5 +1,6 @@
 import type { Page } from 'playwright'
 import { BookData, BookFormat, FORMAT_PRIORITY, COVER_FORMAT_PRIORITY, Contributor, ContributorRole, EditionData } from './types'
+import { pickBestEditionCover } from './preferred-cover'
 import { extractAsinFromUrl, normalizeAmazonUrl } from '@/lib/scraping/utils/amazon-url'
 import { dumpPageHtml } from '@/lib/scraping/utils/html-dump'
 import { SCRAPING_CONFIG } from '@/lib/scraping/config'
@@ -115,7 +116,6 @@ export async function parseBookFromPage(page: Page, options: ParseBookOptions = 
       coverSourceAsin = betterCover.coverSourceAsin
     }
   } else if (editions.length > 0) {
-    // If we scraped editions, pick the best cover from them
     const bestEditionCover = pickBestEditionCover(editions)
     if (bestEditionCover) {
       coverImageUrl = bestEditionCover.mainCoverUrl
@@ -189,40 +189,6 @@ export async function parseBookFromPage(page: Page, options: ParseBookOptions = 
   })
 
   return bookData
-}
-
-/**
- * Pick the best cover from scraped editions based on cover format priority.
- */
-function pickBestEditionCover(editions: EditionData[]): EditionData | null {
-  const editionsWithCovers = editions.filter((e) => e.mainCoverUrl)
-  if (editionsWithCovers.length === 0) return null
-
-  // Prefer portrait-ish covers (avoid landscape spreads), then format priority.
-  editionsWithCovers.sort((a, b) => {
-    const aPortrait = isLikelyPortraitCover(a) ? 1 : 0
-    const bPortrait = isLikelyPortraitCover(b) ? 1 : 0
-    if (aPortrait !== bPortrait) return bPortrait - aPortrait
-
-    const aPriority = COVER_FORMAT_PRIORITY[a.format] ?? 0
-    const bPriority = COVER_FORMAT_PRIORITY[b.format] ?? 0
-    return bPriority - aPriority
-  })
-
-  return editionsWithCovers[0]
-}
-
-function isLikelyPortraitCover(edition: Pick<EditionData, 'coverWidth' | 'coverHeight'>): boolean {
-  const { coverWidth, coverHeight } = edition
-
-  // If we don't have dimensions, don't penalize this candidate.
-  if (!coverWidth || !coverHeight) return true
-  if (coverWidth <= 0 || coverHeight <= 0) return true
-
-  // Covers are typically portrait; treat clearly-landscape images as suspicious
-  // (often inside-spread or promotional graphics on Amazon).
-  const landscapeThreshold = 1.05
-  return coverWidth / coverHeight <= landscapeThreshold
 }
 
 /**

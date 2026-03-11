@@ -460,6 +460,10 @@ async function insertNewBook(
     ...(args.firstSeenFromUrl !== undefined && { firstSeenFromUrl: args.firstSeenFromUrl }),
     ...(args.firstSeenReason !== undefined && { firstSeenReason: args.firstSeenReason }),
   })
+  await context.runMutation(internal.systemStats.mutations.adjustEntityCount, {
+    entityType: 'books',
+    delta: 1,
+  })
   const slug = await generateUniqueBookSlug(context, cleanedTitle, args.authors, args.amazonAuthorIds, bookId)
   await context.db.patch(bookId, { slug })
   return bookId

@@ -2,6 +2,7 @@ import { mutation, internalMutation, type MutationCtx } from '../_generated/serv
 import { v } from 'convex/values'
 import type { Id } from '../_generated/dataModel'
 import { generateUniqueSlug } from '../lib/slug'
+import { syncTopAwardResultTypeForBook } from '../lib/bookAwards'
 
 const awardResultTypeValidator = v.union(
   v.literal('winner'),
@@ -128,6 +129,8 @@ export const upsertBookAwardResult = mutation({
       importBatchKey: args.importBatchKey,
     })
 
+    await syncTopAwardResultTypeForBook(context, args.bookId)
+
     return {
       awardId,
       bookAwardId: result.bookAwardId,
@@ -152,6 +155,7 @@ export const upsertBookAwardResults = mutation({
   handler: async (context, args) => {
     const awardIds = new Set<Id<'awards'>>()
     const bookAwardIds: Id<'bookAwards'>[] = []
+    const bookIdsToSync = new Set<Id<'books'>>()
 
     let created = 0
     let updated = 0
@@ -175,12 +179,17 @@ export const upsertBookAwardResults = mutation({
 
       awardIds.add(awardId)
       bookAwardIds.push(result.bookAwardId)
+      bookIdsToSync.add(entry.bookId)
 
       if (result.created) {
         created += 1
       } else {
         updated += 1
       }
+    }
+
+    for (const bookId of bookIdsToSync) {
+      await syncTopAwardResultTypeForBook(context, bookId)
     }
 
     return {
@@ -223,6 +232,8 @@ export const linkImportedAwardResult = internalMutation({
       sourcePage: args.sourcePage,
       sourceText: args.sourceText,
     })
+
+    await syncTopAwardResultTypeForBook(context, args.bookId)
 
     return {
       awardId,

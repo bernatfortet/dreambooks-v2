@@ -283,6 +283,7 @@ export const clearAllExceptAwards = action({
     await deleteTable('scrapeArtifacts')
     await deleteTable('bookScrapeRuns')
     await deleteTable('seriesScrapeRuns')
+    await context.runMutation(internal.systemStats.mutations.rebuild, {})
 
     console.log('✅ Database clear complete!', deleted)
     return { deleted: deleted as any }

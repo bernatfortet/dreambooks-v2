@@ -1,6 +1,7 @@
 import { internalMutation, mutation, MutationCtx } from '../_generated/server'
 import { v } from 'convex/values'
 import type { Doc, Id } from '../_generated/dataModel'
+import { internal } from '../_generated/api'
 import { generateUniqueSlug } from '../lib/slug'
 import { deleteScrapeArtifacts, clearScrapeQueueReferences, deleteStorageFile } from '../lib/deleteHelpers'
 import { requireScrapeImportKey } from '../lib/scrapeImportAuth'
@@ -92,6 +93,10 @@ export const upsertFromScrape = internalMutation({
       scrapeStatus: 'complete',
       lastScrapedAt: Date.now(),
       createdAt: Date.now(),
+    })
+    await context.runMutation(internal.systemStats.mutations.adjustEntityCount, {
+      entityType: 'authors',
+      delta: 1,
     })
     const slug = await generateUniqueSlug(context, 'authors', args.name, authorId)
     await context.db.patch(authorId, { slug })
@@ -266,6 +271,10 @@ export const deleteAuthor = mutation({
 
     // Delete the author
     await context.db.delete(args.authorId)
+    await context.runMutation(internal.systemStats.mutations.adjustEntityCount, {
+      entityType: 'authors',
+      delta: -1,
+    })
 
     console.log('✅ Author deleted', {
       authorId: args.authorId,

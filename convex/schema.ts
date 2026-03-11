@@ -5,6 +5,33 @@ import { v } from 'convex/values'
 export default defineSchema({
   ...authTables,
 
+  systemStats: defineTable({
+    key: v.string(),
+    entityCounts: v.object({
+      books: v.number(),
+      series: v.number(),
+      authors: v.number(),
+    }),
+    scrapeQueue: v.object({
+      pending: v.number(),
+      processing: v.number(),
+      complete: v.number(),
+      error: v.number(),
+      total: v.number(),
+    }),
+    bookIntake: v.object({
+      pending: v.number(),
+      researching: v.number(),
+      readyToScrape: v.number(),
+      waitingForScrape: v.number(),
+      linked: v.number(),
+      needsReview: v.number(),
+      failed: v.number(),
+      total: v.number(),
+    }),
+    updatedAt: v.number(),
+  }).index('by_key', ['key']),
+
   // ===================
   // PROFILES
   // ===================
@@ -14,11 +41,14 @@ export default defineSchema({
     name: v.string(),
     type: v.union(v.literal('self'), v.literal('child')),
     imageUrl: v.optional(v.string()),
+    slug: v.optional(v.string()),
+    publicVisibility: v.optional(v.union(v.literal('public'), v.literal('private'))),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index('by_ownerUserId', ['ownerUserId'])
-    .index('by_ownerUserId_type', ['ownerUserId', 'type']),
+    .index('by_ownerUserId_type', ['ownerUserId', 'type'])
+    .index('by_slug', ['slug']),
 
   profileBookStates: defineTable({
     profileId: v.id('profiles'),
@@ -29,7 +59,33 @@ export default defineSchema({
   })
     .index('by_profileId', ['profileId'])
     .index('by_bookId', ['bookId'])
-    .index('by_profileId_bookId', ['profileId', 'bookId']),
+    .index('by_profileId_bookId', ['profileId', 'bookId'])
+    .index('by_profileId_likedAt', ['profileId', 'likedAt'])
+    .index('by_profileId_readAt', ['profileId', 'readAt']),
+
+  profileSeriesStates: defineTable({
+    profileId: v.id('profiles'),
+    seriesId: v.id('series'),
+    likedAt: v.optional(v.number()),
+    readAt: v.optional(v.number()),
+    updatedAt: v.number(),
+  })
+    .index('by_profileId', ['profileId'])
+    .index('by_seriesId', ['seriesId'])
+    .index('by_profileId_seriesId', ['profileId', 'seriesId'])
+    .index('by_profileId_likedAt', ['profileId', 'likedAt'])
+    .index('by_profileId_readAt', ['profileId', 'readAt']),
+
+  profileAuthorStates: defineTable({
+    profileId: v.id('profiles'),
+    authorId: v.id('authors'),
+    likedAt: v.optional(v.number()),
+    updatedAt: v.number(),
+  })
+    .index('by_profileId', ['profileId'])
+    .index('by_authorId', ['authorId'])
+    .index('by_profileId_authorId', ['profileId', 'authorId'])
+    .index('by_profileId_likedAt', ['profileId', 'likedAt']),
 
   // ===================
   // SCRAPE QUEUE
@@ -267,6 +323,8 @@ export default defineSchema({
     source: v.string(), // 'amazon', 'openlibrary', etc.
     // Search - denormalized field for full-text search (title + subtitle + authors + identifiers)
     searchText: v.optional(v.string()),
+    // Award summary for lightweight discovery card rendering
+    topAwardResultType: v.optional(v.union(v.literal('winner'), v.literal('honor'))),
     // Scrape version - tracks which version of the scraping logic produced this data
     // Used to identify entities that should be re-scraped when parsing improves
     scrapeVersion: v.optional(v.number()),

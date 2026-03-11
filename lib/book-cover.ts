@@ -1,4 +1,5 @@
 type BookCoverFields = {
+  _id?: string | null
   coverUrl?: string | null
   coverUrlThumb?: string | null
   coverUrlFull?: string | null
@@ -33,4 +34,8 @@ export function getBookCoverDimensions(book: BookCoverFields) {
   const height = book.coverHeight ?? book.cover?.height ?? null
 
   return { width, height }
+}
+
+export function getBookCoverKey(book: BookCoverFields) {
+  return [book._id ?? '', getBookCoverUrl(book) ?? '', getBookCoverUrlFull(book) ?? '', book.cover?.width ?? book.coverWidth ?? '', book.cover?.height ?? book.coverHeight ?? ''].join(':')
 }

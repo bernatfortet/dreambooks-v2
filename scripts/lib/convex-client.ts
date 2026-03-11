@@ -3,6 +3,7 @@ import { api } from '@/convex/_generated/api'
 import type { BookData } from '@/lib/scraping/domains/book/types'
 import type { BookReviewMetadata } from '@/lib/scraping/domains/book/review'
 import { FORMAT_PRIORITY, isAudioFormat } from '@/lib/scraping/domains/book/types'
+import { pickPreferredCoverFromScrapedData } from '@/lib/scraping/domains/book/preferred-cover'
 import type { Id } from '@/convex/_generated/dataModel'
 
 type ImportResult = {
@@ -47,6 +48,15 @@ export async function importBookToConvex(params: {
 
   // Transform null values to undefined (Convex validators don't accept null)
   const canonicalAmazonUrl = getCanonicalAmazonUrl(scrapedData, amazonUrl)
+  const preferredCover = pickPreferredCoverFromScrapedData(scrapedData)
+
+  if (preferredCover.coverSourceFormat !== scrapedData.coverSourceFormat) {
+    console.log('🎨 Replacing scraped cover with preferred edition cover', {
+      title: scrapedData.title,
+      fromFormat: scrapedData.coverSourceFormat ?? 'unknown',
+      toFormat: preferredCover.coverSourceFormat ?? 'unknown',
+    })
+  }
 
   const cleanedData = {
     title: scrapedData.title,
@@ -67,11 +77,11 @@ export async function importBookToConvex(params: {
     publishedDate: scrapedData.publishedDate ?? undefined,
     pageCount: scrapedData.pageCount ?? undefined,
     description: scrapedData.description ?? undefined,
-    coverImageUrl: scrapedData.coverImageUrl ?? undefined,
-    coverWidth: scrapedData.coverWidth ?? undefined,
-    coverHeight: scrapedData.coverHeight ?? undefined,
-    coverSourceFormat: scrapedData.coverSourceFormat ?? undefined,
-    coverSourceAsin: scrapedData.coverSourceAsin ?? undefined,
+    coverImageUrl: preferredCover.coverImageUrl ?? undefined,
+    coverWidth: preferredCover.coverWidth ?? undefined,
+    coverHeight: preferredCover.coverHeight ?? undefined,
+    coverSourceFormat: preferredCover.coverSourceFormat ?? undefined,
+    coverSourceAsin: preferredCover.coverSourceAsin ?? undefined,
     lexileScore: scrapedData.lexileScore ?? undefined,
     ageRangeMin: scrapedData.ageRangeMin ?? undefined,
     ageRangeMax: scrapedData.ageRangeMax ?? undefined,

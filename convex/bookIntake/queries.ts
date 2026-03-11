@@ -2,6 +2,7 @@ import { query } from '../_generated/server'
 import { v } from 'convex/values'
 import type { QueryCtx } from '../_generated/server'
 import type { Doc } from '../_generated/dataModel'
+import { readSystemStatsWithFallback } from '../lib/systemStats'
 import { requireSuperadmin } from '../lib/superadmin'
 
 type IntakeStatus = Doc<'bookIntake'>['status']
@@ -43,10 +44,7 @@ export const stats = query({
   }),
   handler: async (context) => {
     await requireSuperadmin(context)
-
-    const items = await context.db.query('bookIntake').collect()
-    const counts = countStatuses(items)
-    return counts
+    return (await readSystemStatsWithFallback(context.db)).bookIntake
   },
 })
 
@@ -66,14 +64,12 @@ export const listQueue = query({
       sourceLabel: v.union(v.string(), v.null()),
       sourcePath: v.union(v.string(), v.null()),
       sourcePage: v.union(v.number(), v.null()),
-      rawText: v.union(v.string(), v.null()),
       searchQuery: v.string(),
       attemptCount: v.number(),
       lastError: v.union(v.string(), v.null()),
       needsReviewReason: v.union(v.string(), v.null()),
       matchedAsin: v.union(v.string(), v.null()),
       matchedAmazonUrl: v.union(v.string(), v.null()),
-      candidateSnapshotJson: v.union(v.string(), v.null()),
       scrapeQueueId: v.union(v.id('scrapeQueue'), v.null()),
       linkedAwardName: v.union(v.string(), v.null()),
       linkedAwardYear: v.union(v.number(), v.null()),
@@ -106,6 +102,34 @@ export const listQueue = query({
 
     const queueItems = await Promise.all(filteredItems.map((item) => buildQueueItem(context, item)))
     return queueItems
+  },
+})
+
+export const getQueueItemDetail = query({
+  args: {
+    intakeId: v.id('bookIntake'),
+  },
+  returns: v.union(
+    v.object({
+      _id: v.id('bookIntake'),
+      rawText: v.union(v.string(), v.null()),
+      sourceMetadataJson: v.union(v.string(), v.null()),
+      candidateSnapshotJson: v.union(v.string(), v.null()),
+    }),
+    v.null(),
+  ),
+  handler: async (context, args) => {
+    await requireSuperadmin(context)
+
+    const intakeItem = await context.db.get(args.intakeId)
+    if (!intakeItem) return null
+
+    return {
+      _id: intakeItem._id,
+      rawText: intakeItem.rawText ?? null,
+      sourceMetadataJson: intakeItem.sourceMetadataJson ?? null,
+      candidateSnapshotJson: intakeItem.candidateSnapshotJson ?? null,
+    }
   },
 })
 
@@ -147,31 +171,6 @@ export const listNeedsReview = query({
       }))
   },
 })
-
-function countStatuses(items: Array<{ status: IntakeStatus }>) {
-  const counts = {
-    pending: 0,
-    researching: 0,
-    readyToScrape: 0,
-    waitingForScrape: 0,
-    linked: 0,
-    needsReview: 0,
-    failed: 0,
-    total: items.length,
-  }
-
-  for (const item of items) {
-    if (item.status === 'pending') counts.pending += 1
-    if (item.status === 'researching') counts.researching += 1
-    if (item.status === 'ready_to_scrape') counts.readyToScrape += 1
-    if (item.status === 'waiting_for_scrape') counts.waitingForScrape += 1
-    if (item.status === 'linked') counts.linked += 1
-    if (item.status === 'needs_review') counts.needsReview += 1
-    if (item.status === 'failed') counts.failed += 1
-  }
-
-  return counts
-}
 
 async function loadQueueItems(
   context: QueryCtx,
@@ -231,14 +230,12 @@ async function buildQueueItem(
     sourceLabel: item.sourceLabel ?? null,
     sourcePath: item.sourcePath ?? null,
     sourcePage: item.sourcePage ?? null,
-    rawText: item.rawText ?? null,
     searchQuery: item.searchQuery,
     attemptCount: item.attemptCount,
     lastError: item.lastError ?? null,
     needsReviewReason: item.needsReviewReason ?? null,
     matchedAsin: item.matchedAsin ?? null,
     matchedAmazonUrl: item.matchedAmazonUrl ?? null,
-    candidateSnapshotJson: item.candidateSnapshotJson ?? null,
     scrapeQueueId: item.scrapeQueueId ?? null,
     linkedAwardName: item.linkedAwardName ?? null,
     linkedAwardYear: item.linkedAwardYear ?? null,

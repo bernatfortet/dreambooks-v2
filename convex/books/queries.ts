@@ -5,6 +5,8 @@ import { v } from 'convex/values'
 import { Id, Doc } from '../_generated/dataModel'
 import { isBookVisibleForDiscovery } from '../lib/bookVisibility'
 
+const topAwardResultTypeValidator = v.union(v.literal('winner'), v.literal('honor'), v.null())
+
 /**
  * Helper to resolve cover URLs from storage IDs and build enriched cover object.
  * Returns the full cover object with resolved URLs merged in.
@@ -113,6 +115,7 @@ const discoveryBookValidator = v.object({
   slug: v.union(v.string(), v.null()),
   authors: v.array(v.string()),
   seriesPosition: v.union(v.number(), v.null()),
+  topAwardResultType: topAwardResultTypeValidator,
   cover: v.object({
     url: v.union(v.string(), v.null()),
     urlThumb: v.union(v.string(), v.null()),
@@ -136,6 +139,7 @@ async function buildDiscoveryBooksPage(
         slug: book.slug ?? null,
         authors: book.authors,
         seriesPosition: book.seriesPosition ?? null,
+        topAwardResultType: book.topAwardResultType ?? null,
         cover: {
           url: cover.url,
           urlThumb: cover.urlThumb,

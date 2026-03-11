@@ -515,6 +515,10 @@ export const internalDeleteBook = internalMutation({
 
     // Delete the book
     await context.db.delete(args.bookId)
+    await context.runMutation(internal.systemStats.mutations.adjustEntityCount, {
+      entityType: 'books',
+      delta: -1,
+    })
 
     return null
   },

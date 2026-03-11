@@ -8,6 +8,7 @@ import { extractAsin, normalizeAmazonUrl } from '@/lib/scraping/utils/amazon-url
 import { createAwardEntryKey, normalizeNameForComparison, normalizeTitleForComparison } from '@/lib/awards/import/normalize'
 
 const BOOK_INTAKE_LEASE_DURATION_MS = 10 * 60 * 1000
+type IntakeStatus = Doc<'bookIntake'>['status']
 
 const awardResultTypeValidator = v.union(
   v.literal('winner'),
@@ -96,6 +97,9 @@ export const enqueueManual = mutation({
         rawText: args.rawText,
       }),
     )
+    await trackBookIntakeStatusChange(context, {
+      nextStatus: 'pending',
+    })
 
     return {
       intakeId,
@@ -159,6 +163,13 @@ export const enqueueManyFromAwardRows = mutation({
       created += 1
     }
 
+    if (created > 0) {
+      await trackBookIntakeStatusChange(context, {
+        nextStatus: 'pending',
+        count: created,
+      })
+    }
+
     return {
       created,
       skipped,
@@ -218,6 +229,10 @@ export const retry = mutation({
       candidateSnapshotJson: undefined,
       ...clearWorkerLeaseFields(),
       updatedAt: Date.now(),
+    })
+    await trackBookIntakeStatusChange(context, {
+      previousStatus: intakeItem.status,
+      nextStatus: 'pending',
     })
 
     return null
@@ -316,6 +331,10 @@ export const markScrapeFailed = internalMutation({
       ...clearWorkerLeaseFields(),
       updatedAt: Date.now(),
     })
+    await trackBookIntakeStatusChange(context, {
+      previousStatus: intakeItem.status,
+      nextStatus: 'needs_review',
+    })
 
     return null
   },
@@ -346,6 +365,10 @@ async function finalizeLinkedBook(
     resolvedAt: now,
     updatedAt: now,
   })
+  await trackBookIntakeStatusChange(context, {
+    previousStatus: params.intakeItem.status,
+    nextStatus: 'linked',
+  })
 
   if (params.intakeItem.sourceType !== 'award') return
   if (!params.intakeItem.linkedAwardName || !params.intakeItem.linkedAwardYear || !params.intakeItem.linkedAwardCategory) return
@@ -375,6 +398,10 @@ async function claimNextPendingIntake(context: MutationCtx, args: { workerId: st
     lastAttemptAt: now,
     updatedAt: now,
   })
+  await trackBookIntakeStatusChange(context, {
+    previousStatus: intakeItem.status,
+    nextStatus: 'researching',
+  })
 
   return toClaimedItem(intakeItem)
 }
@@ -401,6 +428,10 @@ async function markIntakeNeedsReview(
     ...clearWorkerLeaseFields(),
     updatedAt: Date.now(),
   })
+  await trackBookIntakeStatusChange(context, {
+    previousStatus: intakeItem.status,
+    nextStatus: 'needs_review',
+  })
 
   return null
 }
@@ -420,6 +451,10 @@ async function markIntakeFailed(
     lastError: args.errorMessage,
     ...clearWorkerLeaseFields(),
     updatedAt: Date.now(),
+  })
+  await trackBookIntakeStatusChange(context, {
+    previousStatus: intakeItem.status,
+    nextStatus: 'failed',
   })
 
   return null
@@ -502,6 +537,9 @@ async function markIntakeReadyToScrape(
       bookIntakeId: args.intakeId,
       createdAt: Date.now(),
     })
+    await context.runMutation(internal.systemStats.mutations.adjustScrapeQueueStatus, {
+      nextStatus: 'pending',
+    })
   }
 
   await context.db.patch(args.intakeId, {
@@ -511,6 +549,10 @@ async function markIntakeReadyToScrape(
     scrapeQueueId,
     ...clearWorkerLeaseFields(),
     updatedAt: Date.now(),
+  })
+  await trackBookIntakeStatusChange(context, {
+    previousStatus: intakeItem.status,
+    nextStatus: 'waiting_for_scrape',
   })
 
   return null
@@ -699,4 +741,17 @@ function clearWorkerLeaseFields() {
     leaseExpiresAt: undefined,
     workerId: undefined,
   }
+}
+
+async function trackBookIntakeStatusChange(
+  context: MutationCtx,
+  params: {
+    previousStatus?: IntakeStatus
+    nextStatus?: IntakeStatus
+    count?: number
+  },
+) {
+  if (params.previousStatus === params.nextStatus) return
+
+  await context.runMutation(internal.systemStats.mutations.adjustBookIntakeStatus, params)
 }

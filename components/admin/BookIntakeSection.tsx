@@ -14,6 +14,8 @@ import { Input } from '@/components/ui/input'
 type IntakeStats = NonNullable<FunctionReturnType<typeof api.bookIntake.queries.stats>>
 type IntakeQueue = NonNullable<FunctionReturnType<typeof api.bookIntake.queries.listQueue>>
 type IntakeItem = IntakeQueue[number]
+type IntakeDetail = NonNullable<FunctionReturnType<typeof api.bookIntake.queries.getQueueItemDetail>>
+type IntakeStatus = IntakeItem['status']
 
 type CandidateSnapshot = {
   existingCandidates?: Array<{
@@ -34,26 +36,37 @@ type CandidateSnapshot = {
   }>
 }
 
-const ACTIVE_STATUSES = ['pending', 'researching', 'waiting_for_scrape', 'needs_review', 'failed'] as const
-const HANDLED_STATUSES = ['linked'] as const
+const ACTIVE_STATUSES: IntakeStatus[] = ['pending', 'researching', 'waiting_for_scrape', 'needs_review', 'failed']
+const HANDLED_STATUSES: IntakeStatus[] = ['linked']
 const ACTIVE_AND_HANDLED_STATUSES = [...ACTIVE_STATUSES, ...HANDLED_STATUSES]
 const QUEUE_PAGE_SIZE = 50
 
 export function BookIntakeSection() {
+  const [shouldLoadQueue, setShouldLoadQueue] = useState(false)
   const [showHandled, setShowHandled] = useState(false)
-  const intakeStats = useQuery(api.bookIntake.queries.stats)
-  const intakeItems = useQuery(api.bookIntake.queries.listQueue, {
-    statuses: showHandled ? ACTIVE_AND_HANDLED_STATUSES : ACTIVE_STATUSES,
-    limit: QUEUE_PAGE_SIZE,
-  })
+  const intakeStats = useQuery(api.bookIntake.queries.stats, shouldLoadQueue ? {} : 'skip')
+  const intakeItems = useQuery(
+    api.bookIntake.queries.listQueue,
+    shouldLoadQueue
+      ? {
+          statuses: showHandled ? ACTIVE_AND_HANDLED_STATUSES : ACTIVE_STATUSES,
+          limit: QUEUE_PAGE_SIZE,
+        }
+      : 'skip',
+  )
   const hasQueueItems = Boolean(intakeItems?.length)
   const hasHandledItems = Boolean(intakeStats?.linked)
 
   return (
     <section className='mb-8 space-y-4'>
-      <div className='flex items-center gap-2'>
-        <h2 className='text-xl font-semibold'>Book Intake Queue</h2>
-        <StatusSummaryBadges stats={intakeStats} />
+      <div className='flex items-center justify-between gap-3'>
+        <div className='flex items-center gap-2'>
+          <h2 className='text-xl font-semibold'>Book Intake Queue</h2>
+          <StatusSummaryBadges stats={intakeStats} />
+        </div>
+        <Button variant='outline' size='sm' onClick={() => setShouldLoadQueue((value) => !value)}>
+          {shouldLoadQueue ? 'Hide intake queue' : 'Load intake queue'}
+        </Button>
       </div>
 
       <Card>
@@ -65,7 +78,17 @@ export function BookIntakeSection() {
         </CardContent>
       </Card>
 
-      {(hasQueueItems || hasHandledItems) && (
+      {!shouldLoadQueue ? (
+        <Card>
+          <CardContent className='pt-6'>
+            <p className='text-sm text-muted-foreground'>
+              Intake rows can be large because they include candidate snapshots, so this queue stays unloaded until you open it.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {shouldLoadQueue && (hasQueueItems || hasHandledItems) ? (
         <Card>
           <CardHeader className='pb-3'>
             <div className='flex items-start justify-between gap-3'>
@@ -89,7 +112,7 @@ export function BookIntakeSection() {
             )}
           </CardContent>
         </Card>
-      )}
+      ) : null}
     </section>
   )
 }
@@ -186,8 +209,9 @@ function BookIntakeRow({ item }: { item: IntakeItem }) {
   const [overrideUrl, setOverrideUrl] = useState(item.matchedAmazonUrl ?? '')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  const snapshot = parseCandidateSnapshot(item.candidateSnapshotJson)
+  const [showDetails, setShowDetails] = useState(false)
+  const detail = useQuery(api.bookIntake.queries.getQueueItemDetail, showDetails ? { intakeId: item._id } : 'skip')
+  const snapshot = parseCandidateSnapshot(detail?.candidateSnapshotJson ?? null)
 
   async function handleRetry() {
     await runMutation({
@@ -244,6 +268,9 @@ function BookIntakeRow({ item }: { item: IntakeItem }) {
         <BookIntakeMeta item={item} />
 
         <div className='flex flex-wrap gap-2'>
+          <Button variant='outline' size='sm' onClick={() => setShowDetails((value) => !value)} disabled={isSubmitting}>
+            {showDetails ? 'Hide details' : 'Review details'}
+          </Button>
           <Button variant='outline' size='sm' onClick={handleRetry} disabled={isSubmitting}>
             Retry
           </Button>
@@ -253,24 +280,29 @@ function BookIntakeRow({ item }: { item: IntakeItem }) {
         </div>
       </div>
 
-      <ExistingCandidates
-        candidates={snapshot?.existingCandidates}
-        isSubmitting={isSubmitting}
-        onResolveExisting={handleResolveExisting}
-      />
+      {showDetails ? (
+        <>
+          <QueueItemDetailState detail={detail} />
+          <ExistingCandidates
+            candidates={snapshot?.existingCandidates}
+            isSubmitting={isSubmitting}
+            onResolveExisting={handleResolveExisting}
+          />
 
-      <AmazonCandidates
-        candidates={snapshot?.amazonCandidates}
-        isSubmitting={isSubmitting}
-        onSendToScrape={handleSendToScrape}
-      />
+          <AmazonCandidates
+            candidates={snapshot?.amazonCandidates}
+            isSubmitting={isSubmitting}
+            onSendToScrape={handleSendToScrape}
+          />
 
-      <OverrideUrlForm
-        overrideUrl={overrideUrl}
-        isSubmitting={isSubmitting}
-        onOverrideUrlChange={setOverrideUrl}
-        onSendToScrape={handleSendToScrape}
-      />
+          <OverrideUrlForm
+            overrideUrl={overrideUrl}
+            isSubmitting={isSubmitting}
+            onOverrideUrlChange={setOverrideUrl}
+            onSendToScrape={handleSendToScrape}
+          />
+        </>
+      ) : null}
 
       {error && <p className='text-sm text-destructive'>{error}</p>}
     </div>
@@ -420,6 +452,18 @@ function StatusSummaryBadges({ stats }: { stats: IntakeStats | undefined }) {
       {stats.failed > 0 && <Badge variant='destructive'>{stats.failed} failed</Badge>}
     </div>
   )
+}
+
+function QueueItemDetailState({ detail }: { detail: IntakeDetail | null | undefined }) {
+  if (detail === undefined) {
+    return <p className='text-sm text-muted-foreground'>Loading intake details...</p>
+  }
+
+  if (detail === null) {
+    return <p className='text-sm text-muted-foreground'>Details unavailable.</p>
+  }
+
+  return null
 }
 
 function parseCandidateSnapshot(value: string | null): CandidateSnapshot | null {

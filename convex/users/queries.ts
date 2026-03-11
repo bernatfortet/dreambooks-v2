@@ -1,9 +1,8 @@
-import { getAuthUserId } from '@convex-dev/auth/server'
 import { internalQuery, query } from '../_generated/server'
 import type { QueryCtx } from '../_generated/server'
 import { v } from 'convex/values'
-import { getAuthTokenProfile } from '../lib/authTokenProfile'
 import { isSuperadminEmail } from '../lib/superadmin'
+import { getViewerIdentity } from '../lib/viewerProfile'
 
 export const viewer = query({
   args: {},
@@ -31,19 +30,15 @@ export const currentIsSuperadmin = internalQuery({
 })
 
 async function getViewerProfile(context: QueryCtx) {
-  const userId = await getAuthUserId(context)
-  if (!userId) return null
+  const viewerIdentity = await getViewerIdentity(context)
+  if (!viewerIdentity) return null
 
-  const user = await context.db.get(userId)
-  if (!user) return null
-
-  const tokenProfile = await getAuthTokenProfile(context, userId)
-  const email = user.email ?? tokenProfile?.email ?? undefined
+  const email = viewerIdentity.email
 
   return {
-    name: user.name ?? tokenProfile?.name ?? tokenProfile?.given_name ?? undefined,
+    name: viewerIdentity.name,
     email,
-    imageUrl: user.image ?? tokenProfile?.picture ?? undefined,
+    imageUrl: viewerIdentity.imageUrl,
     isSuperadmin: isSuperadminEmail(email),
   }
 }
