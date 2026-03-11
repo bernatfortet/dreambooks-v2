@@ -50,8 +50,8 @@ type AuthorItemProps = {
 
 function AuthorItem({ slug, name, imageUrl, books }: AuthorItemProps) {
   return (
-    <div className='space-y-4'>
-      <div className='flex items-center gap-4'>
+    <div className='space-y-4 sm:flex sm:items-start sm:gap-6 sm:space-y-0'>
+      <div className='flex items-center gap-4 sm:w-56 sm:shrink-0'>
         <AuthorAvatar imageUrl={imageUrl} name={name} />
 
         <Link href={getAuthorPath(slug)}>
@@ -60,9 +60,9 @@ function AuthorItem({ slug, name, imageUrl, books }: AuthorItemProps) {
       </div>
 
       {books.length === 0 ? (
-        <p className='text-sm text-muted-foreground'>No books yet.</p>
+        <p className='text-sm text-muted-foreground sm:flex-1'>No books yet.</p>
       ) : (
-        <div className='grid grid-cols-2 gap-3 sm:flex sm:gap-3 sm:overflow-x-auto sm:pb-2'>
+        <div className='grid grid-cols-2 gap-3 sm:min-w-0 sm:flex sm:flex-1 sm:gap-3 sm:overflow-x-auto sm:pb-2'>
           {books.map((book) => <AuthorBookLink key={book._id} book={book} />)}
         </div>
       )}
@@ -74,7 +74,7 @@ function AuthorBookLink({ book }: { book: AuthorBook }) {
   const coverAspectRatio = getBookCoverAspectRatio(book.coverWidth, book.coverHeight)
 
   return (
-    <Link href={getBookPath(book.slug, book._id)} className='group min-w-0 sm:w-28 sm:shrink-0'>
+    <Link href={getBookPath(book.slug, book._id)} className='group min-w-0 sm:w-32 sm:shrink-0'>
       <div className='relative mb-2 overflow-hidden rounded-lg bg-muted' style={{ aspectRatio: coverAspectRatio }}>
         {book.coverUrl ? (
           <Image
@@ -82,7 +82,7 @@ function AuthorBookLink({ book }: { book: AuthorBook }) {
             alt={book.title}
             fill
             className='object-cover group-hover:scale-105 transition-transform duration-200'
-            sizes='(max-width: 640px) 44vw, 112px'
+            sizes='(max-width: 640px) 44vw, 128px'
           />
         ) : (
           <div className='flex h-full w-full items-center justify-center p-2 text-center text-xs text-muted-foreground'>
@@ -100,15 +100,15 @@ function AuthorListSkeleton() {
   return (
     <div className='space-y-8'>
       {Array.from({ length: 5 }).map((_, index) => (
-        <div key={index} className='space-y-4'>
-          <div className='flex items-center gap-4'>
+        <div key={index} className='space-y-4 sm:flex sm:items-start sm:gap-6 sm:space-y-0'>
+          <div className='flex items-center gap-4 sm:w-56 sm:shrink-0'>
             <div className='h-16 w-16 shrink-0 animate-pulse rounded-full bg-muted' />
             <div className='h-6 w-48 animate-pulse rounded bg-muted' />
           </div>
 
-          <div className='grid grid-cols-2 gap-3 sm:flex sm:gap-3'>
+          <div className='grid grid-cols-2 gap-3 sm:min-w-0 sm:flex sm:flex-1 sm:gap-3'>
             {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className='aspect-2/3 animate-pulse rounded-lg bg-muted sm:w-28 sm:shrink-0' />
+              <div key={i} className='aspect-2/3 animate-pulse rounded-lg bg-muted sm:w-32 sm:shrink-0' />
             ))}
           </div>
         </div>
