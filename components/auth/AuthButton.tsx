@@ -1,10 +1,14 @@
 'use client'
 
+import Link from 'next/link'
 import { useAuthActions, useAuthToken } from '@convex-dev/auth/react'
 import { api } from '@/convex/_generated/api'
 import { Loader } from '@/components/atomic/Loader'
+import { CreateChildProfileDialog } from '@/components/profiles/CreateChildProfileDialog'
+import { useActiveProfile } from '@/components/profiles/ActiveProfileProvider'
 import { useConvexAuth, useQuery } from 'convex/react'
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
+import { Check, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -12,6 +16,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 
@@ -21,7 +28,7 @@ export function AuthButton() {
   const authToken = useAuthToken()
   const viewer = useQuery(api.users.queries.viewer)
   const [pendingAction, setPendingAction] = useState<'sign-in' | 'sign-out' | null>(null)
-  const profile = useMemo(() => getDisplayProfile(viewer, decodeAuthToken(authToken)), [authToken, viewer])
+  const accountProfile = getDisplayProfile(viewer, decodeAuthToken(authToken))
   const isPending = pendingAction !== null
 
   if (isLoading) {
@@ -35,9 +42,9 @@ export function AuthButton() {
   if (isAuthenticated) {
     return (
       <UserMenu
-        displayEmail={profile.email}
-        displayImageUrl={profile.imageUrl}
-        displayName={profile.name}
+        accountEmail={accountProfile.email}
+        accountImageUrl={accountProfile.imageUrl}
+        accountName={accountProfile.name}
         isPending={isPending}
         onSignOut={() => void handleSignOut()}
       />
@@ -99,46 +106,105 @@ type AuthTokenProfile = {
   pictureUrl?: string
 }
 
+const CHILD_AVATAR_PALETTES = [
+  { backgroundColor: '#FDE68A', color: '#92400E' },
+  { backgroundColor: '#BFDBFE', color: '#1E3A8A' },
+  { backgroundColor: '#C7D2FE', color: '#3730A3' },
+  { backgroundColor: '#FBCFE8', color: '#9D174D' },
+  { backgroundColor: '#BBF7D0', color: '#166534' },
+  { backgroundColor: '#FED7AA', color: '#9A3412' },
+] as const
+
 function UserMenu({
-  displayEmail,
-  displayImageUrl,
-  displayName,
+  accountEmail,
+  accountImageUrl,
+  accountName,
   isPending,
   onSignOut,
 }: {
-  displayEmail?: string
-  displayImageUrl?: string
-  displayName?: string
+  accountEmail?: string
+  accountImageUrl?: string
+  accountName?: string
   isPending: boolean
   onSignOut: () => void
 }) {
-  const label = displayName ?? displayEmail ?? 'User'
+  const { activeProfile, profiles, setActiveProfileId } = useActiveProfile()
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
+  const accountLabel = accountName ?? accountEmail ?? 'User'
+  const triggerLabel = activeProfile?.name ?? accountLabel
+  const triggerProfileAvatar = getProfileAvatarProps({
+    accountImageUrl,
+    imageUrl: activeProfile?.imageUrl,
+    label: triggerLabel,
+    profileType: activeProfile?.type,
+  })
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type='button'
-          className='flex size-9 items-center justify-center overflow-hidden rounded-full border bg-background shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50'
-          disabled={isPending}
-          aria-label='Open account menu'
-        >
-          <AvatarContent imageUrl={displayImageUrl} label={label} />
-        </button>
-      </DropdownMenuTrigger>
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type='button'
+            className='flex size-9 items-center justify-center overflow-hidden rounded-full border bg-background shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50'
+            disabled={isPending}
+            aria-label='Open account menu'
+          >
+            <ProfileAvatar {...triggerProfileAvatar} sizeClassName='size-full' />
+          </button>
+        </DropdownMenuTrigger>
 
-      <DropdownMenuContent align='end' sideOffset={8}>
-        <DropdownMenuLabel>
-          <p className='truncate text-sm font-medium'>{label}</p>
-          {displayEmail ? <p className='truncate text-xs text-muted-foreground'>{displayEmail}</p> : null}
-        </DropdownMenuLabel>
+        <DropdownMenuContent align='end' sideOffset={8}>
+          <DropdownMenuLabel>
+            <p className='truncate text-sm font-medium'>{activeProfile?.name ?? accountLabel}</p>
+          </DropdownMenuLabel>
 
-        <DropdownMenuSeparator />
-        <DropdownMenuItem disabled={isPending} onSelect={onSignOut}>
-          {isPending ? 'Signing out...' : 'Sign out'}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+          {activeProfile?.slug ? (
+            <DropdownMenuItem asChild>
+              <Link href={`/profiles/${activeProfile.slug}`}>View Profile</Link>
+            </DropdownMenuItem>
+          ) : null}
+
+          <DropdownMenuSeparator />
+
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>Change Profile</DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuLabel className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>Profiles</DropdownMenuLabel>
+
+              {profiles.map((profile) => (
+                <DropdownMenuItem key={profile._id} disabled={isPending} onSelect={() => setActiveProfileId(profile._id)}>
+                  <ProfileAvatar {...getProfileAvatarProps({ accountImageUrl, imageUrl: profile.imageUrl, label: profile.name, profileType: profile.type })} sizeClassName='size-5' />
+                  <span className='flex-1 truncate'>{profile.name}</span>
+                  <span className='text-xs text-muted-foreground'>{profile.type === 'self' ? 'You' : 'Child'}</span>
+                  {activeProfile?._id === profile._id ? <Check className='size-4 text-primary' /> : null}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+
+          <DropdownMenuItem disabled={isPending} onSelect={() => setIsCreateDialogOpen(true)}>
+            <Plus className='size-4' />
+            Add child profile
+          </DropdownMenuItem>
+
+          <DropdownMenuSeparator />
+
+          {accountEmail ? <DropdownMenuLabel className='text-xs font-normal text-muted-foreground'>{accountEmail}</DropdownMenuLabel> : null}
+
+          <DropdownMenuItem disabled={isPending} onSelect={onSignOut}>
+            {isPending ? 'Signing out...' : 'Sign out'}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <CreateChildProfileDialog
+        open={isCreateDialogOpen}
+        onOpenChange={setIsCreateDialogOpen}
+        onCreated={(profileId) => {
+          setActiveProfileId(profileId)
+        }}
+      />
+    </>
   )
 }
 
@@ -147,6 +213,21 @@ function getDisplayProfile(viewer: ViewerProfile, tokenProfile: AuthTokenProfile
     email: viewer?.email ?? tokenProfile?.email ?? undefined,
     imageUrl: viewer?.imageUrl ?? tokenProfile?.pictureUrl ?? tokenProfile?.picture ?? undefined,
     name: viewer?.name ?? tokenProfile?.name ?? tokenProfile?.givenName ?? undefined,
+  }
+}
+
+function getProfileAvatarProps(args: {
+  accountImageUrl?: string
+  imageUrl?: string
+  label: string
+  profileType?: 'self' | 'child'
+}) {
+  const profileType = args.profileType ?? 'self'
+
+  return {
+    imageUrl: profileType === 'self' ? args.imageUrl ?? args.accountImageUrl : args.imageUrl,
+    label: args.label,
+    profileType,
   }
 }
 
@@ -189,6 +270,47 @@ function AvatarContent({ imageUrl, label }: { imageUrl?: string; label: string }
   }
 
   return <span className='text-sm font-medium'>{getInitials(label)}</span>
+}
+
+function ProfileAvatar({
+  imageUrl,
+  label,
+  profileType,
+  sizeClassName,
+}: {
+  imageUrl?: string
+  label: string
+  profileType: 'self' | 'child'
+  sizeClassName: string
+}) {
+  const childPalette = profileType === 'child' ? getChildAvatarPalette(label) : null
+
+  return (
+    <span
+      className={`flex shrink-0 items-center justify-center overflow-hidden rounded-full text-[10px] font-semibold uppercase ${sizeClassName}`}
+      style={
+        childPalette
+          ? {
+              backgroundColor: childPalette.backgroundColor,
+              color: childPalette.color,
+            }
+          : undefined
+      }
+    >
+      <AvatarContent imageUrl={imageUrl} label={label} />
+    </span>
+  )
+}
+
+function getChildAvatarPalette(label: string) {
+  const normalizedLabel = label.trim().toLowerCase()
+  let hash = 0
+
+  for (const character of normalizedLabel) {
+    hash = (hash * 31 + character.charCodeAt(0)) >>> 0
+  }
+
+  return CHILD_AVATAR_PALETTES[hash % CHILD_AVATAR_PALETTES.length]
 }
 
 function getInitials(label: string) {

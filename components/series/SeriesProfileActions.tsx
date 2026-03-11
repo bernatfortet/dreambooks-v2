@@ -9,22 +9,22 @@ import { ProfileActionControls, type ProfileActionLayout } from '@/components/pr
 import { useProfileActionContext } from '@/components/profiles/useProfileActionContext'
 import { cn } from '@/lib/utils'
 
-type BookProfileActionsProps = {
-  bookId: Id<'books'>
+type SeriesProfileActionsProps = {
   layout?: ProfileActionLayout
+  seriesId: Id<'series'>
 }
 
-export function BookProfileActions(props: BookProfileActionsProps) {
-  const { bookId, layout = 'panel' } = props
+export function SeriesProfileActions(props: SeriesProfileActionsProps) {
+  const { layout = 'panel', seriesId } = props
   const { activeProfile, activeProfileId, canRenderActions } = useProfileActionContext()
-  const toggleLike = useMutation(api.profileBookStates.mutations.toggleLike)
-  const toggleRead = useMutation(api.profileBookStates.mutations.toggleRead)
-  const profileBookState = useQuery(
-    api.profileBookStates.queries.getForBook,
+  const toggleLike = useMutation(api.profileSeriesStates.mutations.toggleLike)
+  const toggleRead = useMutation(api.profileSeriesStates.mutations.toggleRead)
+  const profileSeriesState = useQuery(
+    api.profileSeriesStates.queries.getForSeries,
     activeProfileId
       ? {
           profileId: activeProfileId,
-          bookId,
+          seriesId,
         }
       : 'skip',
   )
@@ -34,21 +34,33 @@ export function BookProfileActions(props: BookProfileActionsProps) {
     return null
   }
 
-  const isLiked = profileBookState?.likedAt !== undefined
-  const isRead = profileBookState?.readAt !== undefined
-  const isDisabled = pendingAction !== null || profileBookState === undefined
+  const isLiked = profileSeriesState?.likedAt !== null
+  const isRead = profileSeriesState?.isRead ?? false
+  const isReadDerivedOnly = profileSeriesState?.readSource === 'derived' && profileSeriesState.explicitReadAt === null
+  const isDisabled = pendingAction !== null || profileSeriesState === undefined
 
   return (
     <ProfileActionControls
       layout={layout}
       profileName={activeProfile.name}
+      footer={
+        layout === 'panel' && isReadDerivedOnly ? (
+          <p className='text-sm text-muted-foreground'>
+            This series counts as read because every visible book in it is marked read for {activeProfile.name}.
+          </p>
+        ) : null
+      }
       actions={[
         {
           key: 'read',
           icon: <BookCheck />,
           isActive: isRead,
           disabled: isDisabled,
-          label: isRead ? `Remove read status for ${activeProfile.name}` : `Mark as read for ${activeProfile.name}`,
+          label: getReadLabel({
+            isRead,
+            isReadDerivedOnly,
+            profileName: activeProfile.name,
+          }),
           buttonLabel: pendingAction === 'read' ? 'Saving...' : isRead ? 'Read' : 'Mark as read',
           onClick: () => void handleToggleRead(),
         },
@@ -57,7 +69,7 @@ export function BookProfileActions(props: BookProfileActionsProps) {
           icon: <Heart className={cn(isLiked ? 'fill-current' : undefined)} />,
           isActive: isLiked,
           disabled: isDisabled,
-          label: isLiked ? `Remove like for ${activeProfile.name}` : `Like this book for ${activeProfile.name}`,
+          label: isLiked ? `Remove like for ${activeProfile.name}` : `Like this series for ${activeProfile.name}`,
           buttonLabel: pendingAction === 'like' ? 'Saving...' : isLiked ? 'Liked' : 'Like',
           onClick: () => void handleToggleLike(),
         },
@@ -71,7 +83,7 @@ export function BookProfileActions(props: BookProfileActionsProps) {
     try {
       await toggleLike({
         profileId: activeProfileId,
-        bookId,
+        seriesId,
       })
     } finally {
       setPendingAction(null)
@@ -84,10 +96,26 @@ export function BookProfileActions(props: BookProfileActionsProps) {
     try {
       await toggleRead({
         profileId: activeProfileId,
-        bookId,
+        seriesId,
       })
     } finally {
       setPendingAction(null)
     }
   }
+}
+
+function getReadLabel(args: {
+  isRead: boolean
+  isReadDerivedOnly: boolean
+  profileName: string
+}) {
+  if (args.isReadDerivedOnly) {
+    return `This series counts as read for ${args.profileName} because every visible book is marked read.`
+  }
+
+  if (args.isRead) {
+    return `Remove read status for ${args.profileName}`
+  }
+
+  return `Mark as read for ${args.profileName}`
 }
