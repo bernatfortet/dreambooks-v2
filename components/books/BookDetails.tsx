@@ -3,6 +3,7 @@ import type React from 'react'
 import { Building2, Calendar, FileText, BookOpen, GraduationCap, Youtube, BabyIcon } from 'lucide-react'
 import { AmazonIcon } from '@/components/icons/amazon-icon'
 import { Button } from '@/components/ui/button'
+import { ExpandableDescription } from '@/components/books/ExpandableDescription'
 import { toSlug } from '@/lib/scraping/utils/slug'
 import { api } from '@/convex/_generated/api'
 import type { FunctionReturnType } from 'convex/server'
@@ -169,7 +170,7 @@ export function BookHeading({ book }: { book: Book }) {
         </div>
       </div>
 
-      {description && <p className='max-w-[660px]  text-muted-foreground leading-relaxed'>{description}</p>}
+      {description && <ExpandableDescription description={description} />}
     </>
   )
 }
