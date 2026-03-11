@@ -23,10 +23,29 @@ type SeriesBookEntry = {
 }
 
 async function requireSeriesAdminAccess(context: MutationCtx, apiKey: string | undefined) {
+  // #region agent log
+  fetch('http://127.0.0.1:7246/ingest/f6649a1b-edc0-48c2-9efd-66162917e073',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'259645'},body:JSON.stringify({sessionId:'259645',runId:'series-auth-debug',hypothesisId:'H2',location:'convex/series/mutations.ts:26',message:'Entered requireSeriesAdminAccess',data:{apiKeyPresent:Boolean(apiKey),apiKeyLength:apiKey?.length ?? 0},timestamp:Date.now()})}).catch(()=>{})
+  // #endregion
+  console.log('🧪 requireSeriesAdminAccess', {
+    apiKeyPresent: Boolean(apiKey),
+    apiKeyLength: apiKey?.length ?? 0,
+  })
+
   if (apiKey) {
     requireScrapeImportKey(apiKey)
+
+    // #region agent log
+    fetch('http://127.0.0.1:7246/ingest/f6649a1b-edc0-48c2-9efd-66162917e073',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'259645'},body:JSON.stringify({sessionId:'259645',runId:'series-auth-debug',hypothesisId:'H4',location:'convex/series/mutations.ts:31',message:'Series admin access accepted via API key',data:{apiKeyPresent:true},timestamp:Date.now()})}).catch(()=>{})
+    // #endregion
+    console.log('🧪 requireSeriesAdminAccess branch', { branch: 'apiKey' })
+
     return
   }
+
+  // #region agent log
+  fetch('http://127.0.0.1:7246/ingest/f6649a1b-edc0-48c2-9efd-66162917e073',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'259645'},body:JSON.stringify({sessionId:'259645',runId:'series-auth-debug',hypothesisId:'H4',location:'convex/series/mutations.ts:38',message:'Series admin access falling back to superadmin auth',data:{apiKeyPresent:false},timestamp:Date.now()})}).catch(()=>{})
+  // #endregion
+  console.log('🧪 requireSeriesAdminAccess branch', { branch: 'superadmin' })
 
   await requireSuperadmin(context)
 }
@@ -548,6 +567,16 @@ export const upsertFromUrl = mutation({
   },
   returns: v.id('series'),
   handler: async (context, args) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7246/ingest/f6649a1b-edc0-48c2-9efd-66162917e073',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'259645'},body:JSON.stringify({sessionId:'259645',runId:'series-auth-debug',hypothesisId:'H2',location:'convex/series/mutations.ts:564',message:'Entered upsertFromUrl handler',data:{apiKeyPresent:Boolean(args.apiKey),apiKeyLength:args.apiKey?.length ?? 0,sourceUrl:args.sourceUrl,name:args.name},timestamp:Date.now()})}).catch(()=>{})
+    // #endregion
+    console.log('🧪 upsertFromUrl args', {
+      apiKeyPresent: Boolean(args.apiKey),
+      apiKeyLength: args.apiKey?.length ?? 0,
+      sourceUrl: args.sourceUrl,
+      name: args.name,
+    })
+
     await requireSeriesAdminAccess(context, args.apiKey)
 
     const normalizedName = requireValidSeriesName(args.name)
@@ -1016,24 +1045,20 @@ async function createBasicBookFromSeriesEntry(
   // Clean title: decode HTML entities and remove series names in parentheses
   const cleanedTitle = decodeHtmlEntities(book.title?.replace(/\s*\([^)]+\)\s*$/, '').trim() || book.title)
 
-  const bookId = await context.db.insert('books', {
+  const result = await context.runMutation(internal.books.internal.createOrUpdate, {
     title: cleanedTitle,
     authors: book.authors ?? [],
     asin: book.asin,
     amazonUrl: book.amazonUrl,
     seriesId,
-    ...(book.coverImageUrl && {
-      cover: { sourceUrl: book.coverImageUrl },
-    }),
+    coverSourceUrl: book.coverImageUrl,
     source: 'amazon',
     detailsStatus: 'basic',
     coverStatus: book.coverImageUrl ? 'pending' : 'error',
-    scrapedAt: Date.now(),
-    ...(book.position != null && { seriesPosition: book.position }),
+    ...(book.position != null ? { seriesPosition: book.position } : {}),
   })
-  const slug = await generateUniqueBookSlug(context, cleanedTitle, book.authors ?? [], undefined, bookId)
-  await context.db.patch(bookId, { slug })
-  return bookId
+
+  return result.bookId
 }
 
 async function linkBookToSeriesIfNeeded(

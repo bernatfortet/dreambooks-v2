@@ -4,6 +4,7 @@ import { internal } from '../_generated/api'
 import { generateUniqueSlug, generateUniqueBookSlug } from '../lib/slug'
 import { deleteScrapeArtifacts, clearScrapeQueueReferences, deleteStorageFile } from '../lib/deleteHelpers'
 import { requireSuperadmin } from '../lib/superadmin'
+import { syncTopAwardResultTypeForBook } from '../lib/bookAwards'
 import { extractAsin, normalizeAmazonUrl } from '@/lib/scraping/utils/amazon-url'
 import { buildSearchText } from './lib/searchText'
 import type { DatabaseReader, MutationCtx } from '../_generated/server'
@@ -64,18 +65,11 @@ const bookArgs = {
 
 export const create = internalMutation({
   args: bookArgs,
-  handler: async (context, args) => {
-    // Exclude isbn10/isbn13 (lookup only) and cover source fields
-    const { coverSourceUrl, coverSourceFormat, coverSourceAsin, formats: _formats, isbn10: _isbn10, isbn13: _isbn13, ...rest } = args
+  returns: v.id('books'),
+  handler: async (context, args): Promise<Id<'books'>> => {
+    const result = await context.runMutation(internal.books.internal.createOrUpdate, args)
 
-    const coverFromArgs = buildCoverFromSourceArgs({ coverSourceUrl, coverSourceFormat, coverSourceAsin })
-    const cover = coverFromArgs ? { ...coverFromArgs } : undefined
-
-    const searchText = buildSearchText(rest)
-    const id = await context.db.insert('books', { ...rest, ...(cover ? { cover } : {}), searchText })
-    const slug = await generateUniqueBookSlug(context, args.title, args.authors, args.amazonAuthorIds, id)
-    await context.db.patch(id, { slug })
-    return id
+    return result.bookId
   },
 })
 
@@ -87,120 +81,18 @@ export const upsertFromScrape = internalMutation({
   args: bookArgs,
   returns: v.id('books'),
   handler: async (context, args): Promise<Id<'books'>> => {
-    // Clean title: remove series names in parentheses
-    const cleanedTitle = args.title?.replace(/\s*\([^)]+\)\s*$/, '').trim() || args.title
+    const cleanedTitle = cleanLegacyScrapedTitle(args.title)
     const cleanedArgs = { ...args, title: cleanedTitle }
+    const targetBookId = await resolveLegacyUpsertTargetBookId(context, cleanedArgs.isbn13)
 
-    // If asin exists, use it as primary idempotency key
-    if (cleanedArgs.asin) {
-      const existingByAsin = await context.db
-        .query('books')
-        .withIndex('by_asin', (q) => q.eq('asin', cleanedArgs.asin))
-        .unique()
+    const result = await context.runMutation(internal.books.internal.createOrUpdate, {
+      ...cleanedArgs,
+      ...(targetBookId ? { targetBookId } : {}),
+    })
 
-      if (existingByAsin) {
-        // Exclude isbn10/isbn13 (lookup only) and cover source fields
-        const {
-          coverSourceUrl,
-          coverSourceFormat,
-          coverSourceAsin,
-          formats: _formats,
-          isbn10: _isbn10,
-          isbn13: _isbn13,
-          ...rest
-        } = cleanedArgs
-
-        const coverFromArgs = buildCoverFromSourceArgs({ coverSourceUrl, coverSourceFormat, coverSourceAsin })
-        const cover = coverFromArgs ? { ...(existingByAsin.cover ?? {}), ...coverFromArgs } : undefined
-
-        const searchText = buildSearchText(rest)
-        await context.db.patch(existingByAsin._id, { ...rest, ...(cover ? { cover } : {}), searchText })
-        const titleChanged = cleanedArgs.title !== existingByAsin.title
-        const firstAuthorChanged = cleanedArgs.authors[0] !== existingByAsin.authors[0]
-        const amazonAuthorIdChanged = cleanedArgs.amazonAuthorIds?.[0] !== existingByAsin.amazonAuthorIds?.[0]
-        if (titleChanged || firstAuthorChanged || amazonAuthorIdChanged) {
-          const slug = await generateUniqueBookSlug(
-            context,
-            cleanedArgs.title,
-            cleanedArgs.authors,
-            cleanedArgs.amazonAuthorIds,
-            existingByAsin._id,
-          )
-          await context.db.patch(existingByAsin._id, { slug })
-        }
-        return existingByAsin._id
-      }
-    }
-
-    // Fallback: isbn13 via bookIdentifiers
-    if (cleanedArgs.isbn13) {
-      const resolved: { book: Doc<'books'>; matchedBy: 'asin' | 'isbn13' | 'isbn10' } | null = await context.runQuery(
-        internal.bookIdentifiers.queries.resolveToBook,
-        {
-          isbn13: cleanedArgs.isbn13,
-        },
-      )
-
-      if (resolved?.book) {
-        const {
-          coverSourceUrl,
-          coverSourceFormat,
-          coverSourceAsin,
-          formats: _formats,
-          isbn10: _isbn10,
-          isbn13: _isbn13,
-          ...rest
-        } = cleanedArgs
-
-        const coverFromArgs = buildCoverFromSourceArgs({ coverSourceUrl, coverSourceFormat, coverSourceAsin })
-        const cover = coverFromArgs ? { ...(resolved.book.cover ?? {}), ...coverFromArgs } : undefined
-
-        const searchText = buildSearchText(rest)
-        await context.db.patch(resolved.book._id, { ...rest, ...(cover ? { cover } : {}), searchText })
-        const titleChanged = cleanedArgs.title !== resolved.book.title
-        const firstAuthorChanged = cleanedArgs.authors[0] !== resolved.book.authors[0]
-        const amazonAuthorIdChanged = cleanedArgs.amazonAuthorIds?.[0] !== resolved.book.amazonAuthorIds?.[0]
-        if (titleChanged || firstAuthorChanged || amazonAuthorIdChanged) {
-          const slug = await generateUniqueBookSlug(
-            context,
-            cleanedArgs.title,
-            cleanedArgs.authors,
-            cleanedArgs.amazonAuthorIds,
-            resolved.book._id,
-          )
-          await context.db.patch(resolved.book._id, { slug })
-        }
-        return resolved.book._id
-      }
-    }
-
-    const { coverSourceUrl, coverSourceFormat, coverSourceAsin, formats: _formats, isbn10: _isbn10, isbn13: _isbn13, ...rest } = cleanedArgs
-
-    const coverFromArgs = buildCoverFromSourceArgs({ coverSourceUrl, coverSourceFormat, coverSourceAsin })
-    const cover = coverFromArgs ? { ...coverFromArgs } : undefined
-
-    const searchText = buildSearchText(rest)
-    const bookId = await context.db.insert('books', { ...rest, ...(cover ? { cover } : {}), searchText })
-    const slug = await generateUniqueBookSlug(context, cleanedArgs.title, cleanedArgs.authors, cleanedArgs.amazonAuthorIds, bookId)
-    await context.db.patch(bookId, { slug })
-    return bookId
+    return result.bookId
   },
 })
-
-function buildCoverFromSourceArgs(args: {
-  coverSourceUrl?: string
-  coverSourceFormat?: string
-  coverSourceAsin?: string
-}): { sourceUrl?: string; sourceFormat?: string; sourceAsin?: string } | null {
-  const hasCoverData = args.coverSourceUrl || args.coverSourceFormat || args.coverSourceAsin
-  if (!hasCoverData) return null
-
-  return {
-    ...(args.coverSourceUrl ? { sourceUrl: args.coverSourceUrl } : {}),
-    ...(args.coverSourceFormat ? { sourceFormat: args.coverSourceFormat } : {}),
-    ...(args.coverSourceAsin ? { sourceAsin: args.coverSourceAsin } : {}),
-  }
-}
 
 export const updateCover = internalMutation({
   args: {
@@ -1022,6 +914,32 @@ export const backfillSearchText = internalMutation({
   },
 })
 
+export const backfillTopAwardResultType = internalMutation({
+  args: {
+    cursor: v.optional(v.string()),
+    batchSize: v.optional(v.number()),
+  },
+  returns: v.object({
+    updated: v.number(),
+    nextCursor: v.union(v.string(), v.null()),
+    done: v.boolean(),
+  }),
+  handler: async (context, args) => {
+    const batchSize = args.batchSize ?? 100
+    const result = await context.db.query('books').paginate({ cursor: args.cursor ?? null, numItems: batchSize })
+
+    for (const book of result.page) {
+      await syncTopAwardResultTypeForBook(context, book._id)
+    }
+
+    return {
+      updated: result.page.length,
+      nextCursor: result.continueCursor ?? null,
+      done: result.isDone,
+    }
+  },
+})
+
 async function moveBookRelations(context: MutationCtx, params: { fromBookId: Id<'books'>; toBookId: Id<'books'> }) {
   const { fromBookId, toBookId } = params
 
@@ -1079,4 +997,18 @@ async function moveBookRelations(context: MutationCtx, params: { fromBookId: Id<
   for (const item of queueItems) {
     await context.db.patch(item._id, { bookId: toBookId })
   }
+
+  await syncTopAwardResultTypeForBook(context, toBookId)
+}
+
+function cleanLegacyScrapedTitle(title: string): string {
+  return title?.replace(/\s*\([^)]+\)\s*$/, '').trim() || title
+}
+
+async function resolveLegacyUpsertTargetBookId(context: MutationCtx, isbn13: string | undefined) {
+  if (!isbn13) return null
+
+  const resolved = await context.runQuery(internal.bookIdentifiers.queries.resolveToBook, { isbn13 })
+
+  return resolved?.book?._id ?? null
 }
