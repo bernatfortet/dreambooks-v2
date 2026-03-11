@@ -5,6 +5,7 @@ import { internal } from '../_generated/api'
 import { v } from 'convex/values'
 import { Id } from '../_generated/dataModel'
 import { SCRAPE_VERSIONS } from '../lib/scrapeVersions'
+import { requireScrapeImportKey } from '../lib/scrapeImportAuth'
 
 // Validator for edition data
 const editionDataValidator = v.object({
@@ -150,15 +151,7 @@ export const importFromLocalScrape = action({
     firstSeenReason: v.optional(v.string()),
   },
   handler: async (context, args): Promise<{ bookId: Id<'books'>; isNew: boolean }> => {
-    // Validate API key
-    const expectedKey = process.env.SCRAPE_IMPORT_KEY
-    if (!expectedKey) {
-      throw new Error('SCRAPE_IMPORT_KEY environment variable is not configured')
-    }
-
-    if (args.apiKey !== expectedKey) {
-      throw new Error('Invalid API key')
-    }
+    requireScrapeImportKey(args.apiKey)
 
     console.log('🏁 Importing book from local scrape', { title: args.scrapedData.title })
 

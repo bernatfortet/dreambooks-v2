@@ -64,7 +64,10 @@ export type BookIntakeItem = {
 
 export async function claimNextBookIntake(workerId: string): Promise<BookIntakeItem | null> {
   const client = getConvexClient()
-  const item = await client.mutation(api.bookIntake.mutations.claimNextPending, { workerId })
+  const item = await client.action(api.bookIntake.worker.claimNextPending, {
+    apiKey: getScrapeImportKey(),
+    workerId,
+  })
   return item as BookIntakeItem | null
 }
 
@@ -76,12 +79,19 @@ export async function markBookIntakeNeedsReview(params: {
   matchedAmazonUrl?: string
 }): Promise<void> {
   const client = getConvexClient()
-  await client.mutation(api.bookIntake.mutations.markNeedsReview, params)
+  await client.action(api.bookIntake.worker.markNeedsReview, {
+    apiKey: getScrapeImportKey(),
+    ...params,
+  })
 }
 
 export async function markBookIntakeFailed(intakeId: Id<'bookIntake'>, errorMessage: string): Promise<void> {
   const client = getConvexClient()
-  await client.mutation(api.bookIntake.mutations.markFailed, { intakeId, errorMessage })
+  await client.action(api.bookIntake.worker.markFailed, {
+    apiKey: getScrapeImportKey(),
+    intakeId,
+    errorMessage,
+  })
 }
 
 export async function markBookIntakeResolvedExisting(params: {
@@ -89,7 +99,10 @@ export async function markBookIntakeResolvedExisting(params: {
   bookId: Id<'books'>
 }): Promise<void> {
   const client = getConvexClient()
-  await client.mutation(api.bookIntake.mutations.markResolvedExisting, params)
+  await client.action(api.bookIntake.worker.markResolvedExisting, {
+    apiKey: getScrapeImportKey(),
+    ...params,
+  })
 }
 
 export async function markBookIntakeReadyToScrape(params: {
@@ -97,7 +110,10 @@ export async function markBookIntakeReadyToScrape(params: {
   amazonUrl: string
 }): Promise<void> {
   const client = getConvexClient()
-  await client.mutation(api.bookIntake.mutations.markReadyToScrape, params)
+  await client.action(api.bookIntake.worker.markReadyToScrape, {
+    apiKey: getScrapeImportKey(),
+    ...params,
+  })
 }
 
 /**
@@ -351,6 +367,15 @@ export type EntityStats = {
 export async function fetchEntityStats(): Promise<EntityStats> {
   const client = getConvexClient()
   return await client.query(api.admin.queries.stats, {})
+}
+
+function getScrapeImportKey() {
+  const apiKey = process.env.SCRAPE_IMPORT_KEY
+  if (!apiKey) {
+    throw new Error('SCRAPE_IMPORT_KEY environment variable is not set')
+  }
+
+  return apiKey
 }
 
 // Re-export types

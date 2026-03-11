@@ -3,6 +3,8 @@
 import { action } from '../_generated/server'
 import { internal } from '../_generated/api'
 import { v } from 'convex/values'
+import type { Id } from '../_generated/dataModel'
+import { requireScrapeImportKey } from '../lib/scrapeImportAuth'
 
 /**
  * Migration utility: merge duplicate books created from series scraping.
@@ -35,20 +37,13 @@ export const mergeDuplicatesBySeriesPosition = action({
     groupsFound: number
     booksDeleted: number
     merges: Array<{
-      seriesId: any
+      seriesId: Id<'series'>
       seriesPosition: number
-      keeperBookId: any
-      deletedBookIds: any[]
+      keeperBookId: Id<'books'>
+      deletedBookIds: Id<'books'>[]
     }>
   }> => {
-    const expectedKey = process.env.SCRAPE_IMPORT_KEY
-    if (!expectedKey) {
-      throw new Error('SCRAPE_IMPORT_KEY environment variable is not configured')
-    }
-
-    if (args.apiKey !== expectedKey) {
-      throw new Error('Invalid API key')
-    }
+    requireScrapeImportKey(args.apiKey)
 
     return await context.runMutation(internal.books.mutations.mergeDuplicatesBySeriesPosition, {
       seriesId: args.seriesId,

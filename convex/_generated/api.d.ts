@@ -43,6 +43,7 @@ import type * as lib_bookCoverUrls from "../lib/bookCoverUrls.js";
 import type * as lib_bookVisibility from "../lib/bookVisibility.js";
 import type * as lib_deleteHelpers from "../lib/deleteHelpers.js";
 import type * as lib_identifiers from "../lib/identifiers.js";
+import type * as lib_scrapeImportAuth from "../lib/scrapeImportAuth.js";
 import type * as lib_scrapeVersions from "../lib/scrapeVersions.js";
 import type * as lib_scraping_config from "../lib/scraping/config.js";
 import type * as lib_scraping_domains_book_types from "../lib/scraping/domains/book/types.js";
@@ -125,6 +126,7 @@ declare const fullApi: ApiFromModules<{
   "lib/bookVisibility": typeof lib_bookVisibility;
   "lib/deleteHelpers": typeof lib_deleteHelpers;
   "lib/identifiers": typeof lib_identifiers;
+  "lib/scrapeImportAuth": typeof lib_scrapeImportAuth;
   "lib/scrapeVersions": typeof lib_scrapeVersions;
   "lib/scraping/config": typeof lib_scraping_config;
   "lib/scraping/domains/book/types": typeof lib_scraping_domains_book_types;

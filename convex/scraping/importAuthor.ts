@@ -5,6 +5,7 @@ import { internal } from '../_generated/api'
 import { v } from 'convex/values'
 import { Id } from '../_generated/dataModel'
 import { SCRAPE_VERSIONS } from '../lib/scrapeVersions'
+import { requireScrapeImportKey } from '../lib/scrapeImportAuth'
 import { DEFAULT_LOCAL_SCRAPE_SOURCE, LOCAL_SCRAPE_SOURCES } from '@/lib/scraping/local-source'
 
 // Validator for scraped author data from local Playwright scraper
@@ -39,15 +40,7 @@ export const importFromLocalScrape = action({
     booksLinked: v.number(),
   }),
   handler: async (context, args): Promise<{ authorId: Id<'authors'>; isNew: boolean; booksLinked: number }> => {
-    // Validate API key
-    const expectedKey = process.env.SCRAPE_IMPORT_KEY
-    if (!expectedKey) {
-      throw new Error('SCRAPE_IMPORT_KEY environment variable is not configured')
-    }
-
-    if (args.apiKey !== expectedKey) {
-      throw new Error('Invalid API key')
-    }
+    requireScrapeImportKey(args.apiKey)
 
     const scrapeSource = args.scrapeSource ?? DEFAULT_LOCAL_SCRAPE_SOURCE
 

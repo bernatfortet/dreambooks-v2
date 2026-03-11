@@ -34,6 +34,33 @@ const claimedItemValidator = v.object({
   linkedAwardResultType: v.union(awardResultTypeValidator, v.null()),
 })
 
+const claimNextPendingArgs = {
+  workerId: v.string(),
+}
+
+const markNeedsReviewArgs = {
+  intakeId: v.id('bookIntake'),
+  reason: v.optional(v.string()),
+  candidateSnapshotJson: v.optional(v.string()),
+  matchedAsin: v.optional(v.string()),
+  matchedAmazonUrl: v.optional(v.string()),
+}
+
+const markFailedArgs = {
+  intakeId: v.id('bookIntake'),
+  errorMessage: v.string(),
+}
+
+const resolveExistingArgs = {
+  intakeId: v.id('bookIntake'),
+  bookId: v.id('books'),
+}
+
+const readyToScrapeArgs = {
+  intakeId: v.id('bookIntake'),
+  amazonUrl: v.string(),
+}
+
 export const enqueueManual = mutation({
   args: {
     title: v.string(),
@@ -140,74 +167,36 @@ export const enqueueManyFromAwardRows = mutation({
   },
 })
 
-export const claimNextPending = mutation({
-  args: {
-    workerId: v.string(),
-  },
+export const claimNextPendingInternal = internalMutation({
+  args: claimNextPendingArgs,
   returns: v.union(claimedItemValidator, v.null()),
   handler: async (context, args) => {
-    const intakeItem = await findClaimableIntakeItem(context)
-    if (!intakeItem) return null
-
-    const now = Date.now()
-    await context.db.patch(intakeItem._id, {
-      status: 'researching',
-      workerId: args.workerId,
-      leaseExpiresAt: now + BOOK_INTAKE_LEASE_DURATION_MS,
-      attemptCount: intakeItem.attemptCount + 1,
-      lastAttemptAt: now,
-      updatedAt: now,
-    })
-
-    return toClaimedItem(intakeItem)
+    return await claimNextPendingIntake(context, args)
   },
 })
 
-export const markNeedsReview = mutation({
-  args: {
-    intakeId: v.id('bookIntake'),
-    reason: v.optional(v.string()),
-    candidateSnapshotJson: v.optional(v.string()),
-    matchedAsin: v.optional(v.string()),
-    matchedAmazonUrl: v.optional(v.string()),
-  },
+export const markNeedsReviewInternal = internalMutation({
+  args: markNeedsReviewArgs,
   returns: v.null(),
   handler: async (context, args) => {
-    const intakeItem = await context.db.get(args.intakeId)
-    if (!intakeItem) return null
-
-    await context.db.patch(args.intakeId, {
-      status: 'needs_review',
-      needsReviewReason: trimOptional(args.reason),
-      candidateSnapshotJson: args.candidateSnapshotJson,
-      matchedAsin: trimOptional(args.matchedAsin),
-      matchedAmazonUrl: trimOptional(args.matchedAmazonUrl),
-      ...clearWorkerLeaseFields(),
-      updatedAt: Date.now(),
-    })
-
-    return null
+    return await markIntakeNeedsReview(context, args)
   },
 })
 
 export const markFailed = mutation({
-  args: {
-    intakeId: v.id('bookIntake'),
-    errorMessage: v.string(),
-  },
+  args: markFailedArgs,
   returns: v.null(),
   handler: async (context, args) => {
-    const intakeItem = await context.db.get(args.intakeId)
-    if (!intakeItem) return null
+    await requireSuperadmin(context)
+    return await markIntakeFailed(context, args)
+  },
+})
 
-    await context.db.patch(args.intakeId, {
-      status: 'failed',
-      lastError: args.errorMessage,
-      ...clearWorkerLeaseFields(),
-      updatedAt: Date.now(),
-    })
-
-    return null
+export const markFailedInternal = internalMutation({
+  args: markFailedArgs,
+  returns: v.null(),
+  handler: async (context, args) => {
+    return await markIntakeFailed(context, args)
   },
 })
 
@@ -236,95 +225,36 @@ export const retry = mutation({
 })
 
 export const markResolvedExisting = mutation({
-  args: {
-    intakeId: v.id('bookIntake'),
-    bookId: v.id('books'),
-  },
+  args: resolveExistingArgs,
   returns: v.null(),
   handler: async (context, args) => {
-    const intakeItem = await context.db.get(args.intakeId)
-    if (!intakeItem) return null
+    await requireSuperadmin(context)
+    return await markIntakeResolvedExisting(context, args)
+  },
+})
 
-    await finalizeLinkedBook(context, {
-      intakeItem,
-      bookId: args.bookId,
-    })
-
-    return null
+export const markResolvedExistingInternal = internalMutation({
+  args: resolveExistingArgs,
+  returns: v.null(),
+  handler: async (context, args) => {
+    return await markIntakeResolvedExisting(context, args)
   },
 })
 
 export const markReadyToScrape = mutation({
-  args: {
-    intakeId: v.id('bookIntake'),
-    amazonUrl: v.string(),
-  },
+  args: readyToScrapeArgs,
   returns: v.null(),
   handler: async (context, args) => {
-    const intakeItem = await context.db.get(args.intakeId)
-    if (!intakeItem) return null
+    await requireSuperadmin(context)
+    return await markIntakeReadyToScrape(context, args)
+  },
+})
 
-    const cleanedUrl = cleanAmazonUrl(args.amazonUrl)
-    const matchedAsin = extractAsin(cleanedUrl) ?? undefined
-
-    const existingQueueItem = await context.db
-      .query('scrapeQueue')
-      .withIndex('by_url', (query) => query.eq('url', cleanedUrl))
-      .filter((query) =>
-        query.or(
-          query.eq(query.field('status'), 'pending'),
-          query.eq(query.field('status'), 'processing'),
-          query.eq(query.field('status'), 'complete'),
-        ),
-      )
-      .first()
-
-    if (existingQueueItem?.status === 'complete' && existingQueueItem.bookId) {
-      await finalizeLinkedBook(context, {
-        intakeItem,
-        bookId: existingQueueItem.bookId,
-        matchedAsin,
-        matchedAmazonUrl: cleanedUrl,
-        scrapeQueueId: existingQueueItem._id,
-      })
-      return null
-    }
-
-    let scrapeQueueId = existingQueueItem?._id
-
-    if (existingQueueItem && !existingQueueItem.bookIntakeId) {
-      await context.db.patch(existingQueueItem._id, {
-        bookIntakeId: args.intakeId,
-      })
-    }
-
-    if (!scrapeQueueId) {
-      scrapeQueueId = await context.db.insert('scrapeQueue', {
-        url: cleanedUrl,
-        type: 'book',
-        status: 'pending',
-        priority: 0,
-        displayName: intakeItem.title,
-        scrapeFullSeries: false,
-        source: 'user',
-        referrerUrl: intakeItem.sourcePath,
-        referrerReason: buildIntakeReferrerReason(intakeItem),
-        skipAuthorDiscovery: true,
-        bookIntakeId: args.intakeId,
-        createdAt: Date.now(),
-      })
-    }
-
-    await context.db.patch(args.intakeId, {
-      status: 'waiting_for_scrape',
-      matchedAsin,
-      matchedAmazonUrl: cleanedUrl,
-      scrapeQueueId,
-      ...clearWorkerLeaseFields(),
-      updatedAt: Date.now(),
-    })
-
-    return null
+export const markReadyToScrapeInternal = internalMutation({
+  args: readyToScrapeArgs,
+  returns: v.null(),
+  handler: async (context, args) => {
+    return await markIntakeReadyToScrape(context, args)
   },
 })
 
@@ -430,6 +360,160 @@ async function finalizeLinkedBook(
     sourcePage: params.intakeItem.sourcePage,
     sourceText: params.intakeItem.rawText,
   })
+}
+
+async function claimNextPendingIntake(context: MutationCtx, args: { workerId: string }) {
+  const intakeItem = await findClaimableIntakeItem(context)
+  if (!intakeItem) return null
+
+  const now = Date.now()
+  await context.db.patch(intakeItem._id, {
+    status: 'researching',
+    workerId: args.workerId,
+    leaseExpiresAt: now + BOOK_INTAKE_LEASE_DURATION_MS,
+    attemptCount: intakeItem.attemptCount + 1,
+    lastAttemptAt: now,
+    updatedAt: now,
+  })
+
+  return toClaimedItem(intakeItem)
+}
+
+async function markIntakeNeedsReview(
+  context: MutationCtx,
+  args: {
+    intakeId: Id<'bookIntake'>
+    reason?: string
+    candidateSnapshotJson?: string
+    matchedAsin?: string
+    matchedAmazonUrl?: string
+  },
+) {
+  const intakeItem = await context.db.get(args.intakeId)
+  if (!intakeItem) return null
+
+  await context.db.patch(args.intakeId, {
+    status: 'needs_review',
+    needsReviewReason: trimOptional(args.reason),
+    candidateSnapshotJson: args.candidateSnapshotJson,
+    matchedAsin: trimOptional(args.matchedAsin),
+    matchedAmazonUrl: trimOptional(args.matchedAmazonUrl),
+    ...clearWorkerLeaseFields(),
+    updatedAt: Date.now(),
+  })
+
+  return null
+}
+
+async function markIntakeFailed(
+  context: MutationCtx,
+  args: {
+    intakeId: Id<'bookIntake'>
+    errorMessage: string
+  },
+) {
+  const intakeItem = await context.db.get(args.intakeId)
+  if (!intakeItem) return null
+
+  await context.db.patch(args.intakeId, {
+    status: 'failed',
+    lastError: args.errorMessage,
+    ...clearWorkerLeaseFields(),
+    updatedAt: Date.now(),
+  })
+
+  return null
+}
+
+async function markIntakeResolvedExisting(
+  context: MutationCtx,
+  args: {
+    intakeId: Id<'bookIntake'>
+    bookId: Id<'books'>
+  },
+) {
+  const intakeItem = await context.db.get(args.intakeId)
+  if (!intakeItem) return null
+
+  await finalizeLinkedBook(context, {
+    intakeItem,
+    bookId: args.bookId,
+  })
+
+  return null
+}
+
+async function markIntakeReadyToScrape(
+  context: MutationCtx,
+  args: {
+    intakeId: Id<'bookIntake'>
+    amazonUrl: string
+  },
+) {
+  const intakeItem = await context.db.get(args.intakeId)
+  if (!intakeItem) return null
+
+  const cleanedUrl = cleanAmazonUrl(args.amazonUrl)
+  const matchedAsin = extractAsin(cleanedUrl) ?? undefined
+
+  const existingQueueItem = await context.db
+    .query('scrapeQueue')
+    .withIndex('by_url', (query) => query.eq('url', cleanedUrl))
+    .filter((query) =>
+      query.or(
+        query.eq(query.field('status'), 'pending'),
+        query.eq(query.field('status'), 'processing'),
+        query.eq(query.field('status'), 'complete'),
+      ),
+    )
+    .first()
+
+  if (existingQueueItem?.status === 'complete' && existingQueueItem.bookId) {
+    await finalizeLinkedBook(context, {
+      intakeItem,
+      bookId: existingQueueItem.bookId,
+      matchedAsin,
+      matchedAmazonUrl: cleanedUrl,
+      scrapeQueueId: existingQueueItem._id,
+    })
+    return null
+  }
+
+  let scrapeQueueId = existingQueueItem?._id
+
+  if (existingQueueItem && !existingQueueItem.bookIntakeId) {
+    await context.db.patch(existingQueueItem._id, {
+      bookIntakeId: args.intakeId,
+    })
+  }
+
+  if (!scrapeQueueId) {
+    scrapeQueueId = await context.db.insert('scrapeQueue', {
+      url: cleanedUrl,
+      type: 'book',
+      status: 'pending',
+      priority: 0,
+      displayName: intakeItem.title,
+      scrapeFullSeries: false,
+      source: 'user',
+      referrerUrl: intakeItem.sourcePath,
+      referrerReason: buildIntakeReferrerReason(intakeItem),
+      skipAuthorDiscovery: true,
+      bookIntakeId: args.intakeId,
+      createdAt: Date.now(),
+    })
+  }
+
+  await context.db.patch(args.intakeId, {
+    status: 'waiting_for_scrape',
+    matchedAsin,
+    matchedAmazonUrl: cleanedUrl,
+    scrapeQueueId,
+    ...clearWorkerLeaseFields(),
+    updatedAt: Date.now(),
+  })
+
+  return null
 }
 
 async function findClaimableIntakeItem(context: MutationCtx) {
