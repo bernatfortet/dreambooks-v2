@@ -5,6 +5,20 @@ import type { Doc } from '../_generated/dataModel'
 
 type IntakeStatus = Doc<'bookIntake'>['status']
 
+const DEFAULT_QUEUE_LIMIT = 100
+const DEFAULT_REVIEW_LIMIT = 50
+const MAX_QUEUE_LIMIT = 100
+
+const allIntakeStatuses: IntakeStatus[] = [
+  'pending',
+  'researching',
+  'ready_to_scrape',
+  'waiting_for_scrape',
+  'linked',
+  'needs_review',
+  'failed',
+]
+
 const intakeStatusValidator = v.union(
   v.literal('pending'),
   v.literal('researching'),
@@ -75,9 +89,12 @@ export const listQueue = query({
     }),
   ),
   handler: async (context, args) => {
-    const selectedStatuses = new Set<IntakeStatus>(args.statuses ?? [])
-    const limit = args.limit ?? 100
-    const items = await loadQueueItems(context, selectedStatuses)
+    const selectedStatuses = getSelectedStatuses(args.statuses)
+    const limit = resolveLimit(args.limit, DEFAULT_QUEUE_LIMIT)
+    const items = await loadQueueItems(context, {
+      selectedStatuses,
+      limit,
+    })
     const filteredItems = items
       .sort((left, right) => right.updatedAt - left.updatedAt)
       .slice(0, limit)
@@ -104,15 +121,13 @@ export const listNeedsReview = query({
     }),
   ),
   handler: async (context, args) => {
-    const limit = args.limit ?? 50
-    const items = await context.db
-      .query('bookIntake')
-      .withIndex('by_status_createdAt', (query) => query.eq('status', 'needs_review'))
-      .collect()
+    const limit = resolveLimit(args.limit, DEFAULT_REVIEW_LIMIT)
+    const items = await loadItemsByStatus(context, {
+      status: 'needs_review',
+      limit,
+    })
 
     return items
-      .sort((left, right) => right.updatedAt - left.updatedAt)
-      .slice(0, limit)
       .map((item) => ({
         _id: item._id,
         title: item.title,
@@ -151,21 +166,46 @@ function countStatuses(items: Array<{ status: IntakeStatus }>) {
   return counts
 }
 
-async function loadQueueItems(context: QueryCtx, selectedStatuses: Set<IntakeStatus>) {
-  if (selectedStatuses.size === 0) {
-    return await context.db.query('bookIntake').collect()
-  }
-
+async function loadQueueItems(
+  context: QueryCtx,
+  params: {
+    selectedStatuses: IntakeStatus[]
+    limit: number
+  },
+) {
   const groupedItems = await Promise.all(
-    [...selectedStatuses].map(async (status) => {
-      return await context.db
-        .query('bookIntake')
-        .withIndex('by_status_createdAt', (query) => query.eq('status', status))
-        .collect()
+    params.selectedStatuses.map(async (status) => {
+      return await loadItemsByStatus(context, {
+        status,
+        limit: params.limit,
+      })
     }),
   )
 
   return groupedItems.flat()
+}
+
+function getSelectedStatuses(statuses: IntakeStatus[] | undefined) {
+  if (!statuses?.length) return allIntakeStatuses
+  return statuses
+}
+
+function resolveLimit(value: number | undefined, defaultLimit: number) {
+  return Math.min(value ?? defaultLimit, MAX_QUEUE_LIMIT)
+}
+
+async function loadItemsByStatus(
+  context: QueryCtx,
+  params: {
+    status: IntakeStatus
+    limit: number
+  },
+) {
+  return await context.db
+    .query('bookIntake')
+    .withIndex('by_status_updatedAt', (query) => query.eq('status', params.status))
+    .order('desc')
+    .take(params.limit)
 }
 
 async function buildQueueItem(

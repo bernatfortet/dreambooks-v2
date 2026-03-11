@@ -96,6 +96,7 @@ export default defineSchema({
   })
     .index('by_status', ['status'])
     .index('by_status_createdAt', ['status', 'createdAt'])
+    .index('by_status_updatedAt', ['status', 'updatedAt'])
     .index('by_matchedBookId', ['matchedBookId'])
     .index('by_matchedAmazonUrl', ['matchedAmazonUrl'])
     .index('by_sourceType', ['sourceType'])

@@ -28,6 +28,7 @@ import type * as bookIdentifiers_mutations from "../bookIdentifiers/mutations.js
 import type * as bookIdentifiers_queries from "../bookIdentifiers/queries.js";
 import type * as bookIntake_mutations from "../bookIntake/mutations.js";
 import type * as bookIntake_queries from "../bookIntake/queries.js";
+import type * as bookIntake_worker from "../bookIntake/worker.js";
 import type * as books_internal from "../books/internal.js";
 import type * as books_lib_searchText from "../books/lib/searchText.js";
 import type * as books_migrateDuplicates from "../books/migrateDuplicates.js";
@@ -109,6 +110,7 @@ declare const fullApi: ApiFromModules<{
   "bookIdentifiers/queries": typeof bookIdentifiers_queries;
   "bookIntake/mutations": typeof bookIntake_mutations;
   "bookIntake/queries": typeof bookIntake_queries;
+  "bookIntake/worker": typeof bookIntake_worker;
   "books/internal": typeof books_internal;
   "books/lib/searchText": typeof books_lib_searchText;
   "books/migrateDuplicates": typeof books_migrateDuplicates;

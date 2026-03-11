@@ -35,13 +35,19 @@ type CandidateSnapshot = {
 }
 
 const ACTIVE_STATUSES = ['pending', 'researching', 'waiting_for_scrape', 'needs_review', 'failed'] as const
+const HANDLED_STATUSES = ['linked'] as const
+const ACTIVE_AND_HANDLED_STATUSES = [...ACTIVE_STATUSES, ...HANDLED_STATUSES]
+const QUEUE_PAGE_SIZE = 50
 
 export function BookIntakeSection() {
+  const [showHandled, setShowHandled] = useState(false)
   const intakeStats = useQuery(api.bookIntake.queries.stats)
   const intakeItems = useQuery(api.bookIntake.queries.listQueue, {
-    statuses: [...ACTIVE_STATUSES],
-    limit: 100,
+    statuses: showHandled ? ACTIVE_AND_HANDLED_STATUSES : ACTIVE_STATUSES,
+    limit: QUEUE_PAGE_SIZE,
   })
+  const hasQueueItems = Boolean(intakeItems?.length)
+  const hasHandledItems = Boolean(intakeStats?.linked)
 
   return (
     <section className='mb-8 space-y-4'>
@@ -59,18 +65,28 @@ export function BookIntakeSection() {
         </CardContent>
       </Card>
 
-      {intakeItems && intakeItems.length > 0 && (
+      {(hasQueueItems || hasHandledItems) && (
         <Card>
           <CardHeader className='pb-3'>
-            <CardTitle className='text-base'>Active intake items</CardTitle>
-            <p className='text-sm text-muted-foreground'>
-              Handled items stay in intake for provenance and dedupe, but linked rows are hidden from this default queue.
-            </p>
+            <div className='flex items-start justify-between gap-3'>
+              <div className='space-y-1'>
+                <CardTitle className='text-base'>{showHandled ? 'Active and handled intake items' : 'Active intake items'}</CardTitle>
+                <p className='text-sm text-muted-foreground'>
+                  Handled items stay in intake for provenance and dedupe, but linked rows are hidden from this default queue.
+                </p>
+              </div>
+              {hasHandledItems && (
+                <Button variant='outline' size='sm' onClick={() => setShowHandled((currentValue) => !currentValue)}>
+                  {showHandled ? 'Hide handled' : `Show handled (${intakeStats?.linked ?? 0})`}
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent className='space-y-3'>
-            {intakeItems.map((item) => (
-              <BookIntakeRow key={item._id} item={item} />
-            ))}
+            {intakeItems?.map((item) => <BookIntakeRow key={item._id} item={item} />)}
+            {!hasQueueItems && showHandled && (
+              <p className='text-sm text-muted-foreground'>No handled intake items to show right now.</p>
+            )}
           </CardContent>
         </Card>
       )}
