@@ -22,6 +22,7 @@ type BookMasonryCardProps = {
   canManageBooks?: boolean
   style: React.CSSProperties
   imageHeight: number
+  imageAspectRatio?: number
   priority?: boolean
   onImageMeasure?: (dimensions: { width: number; height: number }) => void
 }
@@ -39,6 +40,7 @@ export function BookMasonryCard({
   canManageBooks = false,
   style,
   imageHeight,
+  imageAspectRatio,
   priority = false,
   onImageMeasure,
 }: BookMasonryCardProps) {
@@ -56,6 +58,7 @@ export function BookMasonryCard({
       titleMarker={titleMarker}
       style={style}
       imageHeight={imageHeight}
+      imageAspectRatio={imageAspectRatio}
       priority={priority}
       isLoaded={isLoaded}
       onImageMeasure={onImageMeasure}
@@ -94,6 +97,7 @@ type BookMasonryLinkProps = {
   titleMarker?: ReactNode
   style: React.CSSProperties
   imageHeight: number
+  imageAspectRatio?: number
   priority: boolean
   isLoaded: boolean
   onImageLoad: () => void
@@ -110,6 +114,7 @@ function BookMasonryLink({
   titleMarker,
   style,
   imageHeight,
+  imageAspectRatio,
   priority,
   isLoaded,
   onImageLoad,
@@ -119,7 +124,7 @@ function BookMasonryLink({
 
   return (
     <Link href={`/books/${slug}`} className='group block' style={style}>
-      <div className='relative rounded-md overflow-hidden mb-2 bg-muted' style={{ height: imageHeight }}>
+      <div className='relative rounded-md overflow-hidden mb-2 bg-muted' style={getImageContainerStyle({ imageHeight, imageAspectRatio })}>
         <div
           className='absolute inset-0 bg-muted transition-opacity duration-300'
           style={{ ...(dominantColor ? { backgroundColor: dominantColor } : {}), opacity: isLoaded ? 0 : 0.25 }}
@@ -189,5 +194,23 @@ function BookDeleteContextMenu({
 }
 
 function getImageSizes(style: React.CSSProperties) {
-  return typeof style.width === 'number' ? `${Math.round(style.width)}px` : style.width ?? '200px'
+  if (typeof style.width === 'number') {
+    return `${Math.round(style.width)}px`
+  }
+
+  return '(max-width: 640px) 50vw, (max-width: 768px) 50vw, (max-width: 1024px) 33vw, 16vw'
+}
+
+function getImageContainerStyle({
+  imageHeight,
+  imageAspectRatio,
+}: {
+  imageHeight: number
+  imageAspectRatio?: number
+}): React.CSSProperties {
+  if (imageAspectRatio && imageAspectRatio > 0) {
+    return { aspectRatio: `${imageAspectRatio}` }
+  }
+
+  return { height: imageHeight }
 }

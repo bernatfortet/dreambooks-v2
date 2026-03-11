@@ -1,7 +1,10 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { BookMasonryGrid, BookMasonryList, type BookMasonryItem } from '@/components/books/masonry'
+import { useQuery } from 'convex/react'
+import { api } from '@/convex/_generated/api'
+import { BookMasonryCard } from '@/components/books/masonry/BookMasonryCard'
+import { BookMasonryGrid, type BookMasonryItem } from '@/components/books/masonry'
 import type { Id } from '@/convex/_generated/dataModel'
 import type { BookFilters } from './filters/types'
 
@@ -25,7 +28,7 @@ type BookItem = {
   titleMarker?: ReactNode
 }
 
-const BOOK_GRID_CLASSES = 'grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3'
+const BOOK_GRID_CLASSES = 'grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 justify-start'
 
 type BookGridContainerProps = {
   children: ReactNode
@@ -42,9 +45,40 @@ type BookGridListProps = {
 }
 
 export function BookGridList({ books, className }: BookGridListProps) {
-  const masonryBooks = books.map(normalizeBookForMasonry)
+  const viewer = useQuery(api.users.queries.viewer)
+  const canManageBooks = viewer?.isSuperadmin === true
 
-  return <BookMasonryList books={masonryBooks} className={className} />
+  return (
+    <BookGridContainer className={className}>
+      {books.map((book, index) => {
+        const normalizedBook = normalizeBookForMasonry(book)
+        const coverAspectRatio =
+          normalizedBook.coverWidth > 0 && normalizedBook.coverHeight > 0
+            ? normalizedBook.coverWidth / normalizedBook.coverHeight
+            : 2 / 3
+
+        return (
+          <BookMasonryCard
+            key={normalizedBook._id}
+            bookId={normalizedBook._id}
+            slug={normalizedBook.slug ?? normalizedBook._id}
+            title={normalizedBook.title}
+            authors={normalizedBook.authors}
+            coverUrl={normalizedBook.coverUrl}
+            dominantColor={normalizedBook.dominantColor}
+            seriesPosition={normalizedBook.seriesPosition}
+            badge={normalizedBook.badge}
+            titleMarker={normalizedBook.titleMarker}
+            canManageBooks={canManageBooks}
+            style={{}}
+            imageHeight={0}
+            imageAspectRatio={coverAspectRatio}
+            priority={index < 12}
+          />
+        )
+      })}
+    </BookGridContainer>
+  )
 }
 
 type BookGridProps = {
