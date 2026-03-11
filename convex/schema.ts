@@ -6,6 +6,32 @@ export default defineSchema({
   ...authTables,
 
   // ===================
+  // PROFILES
+  // ===================
+
+  profiles: defineTable({
+    ownerUserId: v.id('users'),
+    name: v.string(),
+    type: v.union(v.literal('self'), v.literal('child')),
+    imageUrl: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_ownerUserId', ['ownerUserId'])
+    .index('by_ownerUserId_type', ['ownerUserId', 'type']),
+
+  profileBookStates: defineTable({
+    profileId: v.id('profiles'),
+    bookId: v.id('books'),
+    likedAt: v.optional(v.number()),
+    readAt: v.optional(v.number()),
+    updatedAt: v.number(),
+  })
+    .index('by_profileId', ['profileId'])
+    .index('by_bookId', ['bookId'])
+    .index('by_profileId_bookId', ['profileId', 'bookId']),
+
+  // ===================
   // SCRAPE QUEUE
   // ===================
 
@@ -18,11 +44,11 @@ export default defineSchema({
     displayName: v.optional(v.string()), // Book title, series name, or author name
     displayImageUrl: v.optional(v.string()), // Cover image or author photo URL
     // Options
-    scrapeFullSeries: v.boolean(), // If book, also scrape its series and all books
+    scrapeFullSeries: v.boolean(), // Series: save books directly instead of discovery-only queueing
     // Re-scrape skip options (used when re-scraping existing entities)
     skipSeriesLink: v.optional(v.boolean()), // Book: don't upsert/link series
     skipAuthorDiscovery: v.optional(v.boolean()), // Book: don't queue authors
-    skipBookDiscoveries: v.optional(v.boolean()), // Series: don't queue books
+    skipBookDiscoveries: v.optional(v.boolean()), // Series/author: don't queue discovered books
     skipCoverDownload: v.optional(v.boolean()), // All: don't download cover/image
     // Source tracking (optional for backward compat, defaults to 'user' in code)
     source: v.optional(v.union(v.literal('user'), v.literal('discovery'))),
@@ -289,6 +315,7 @@ export default defineSchema({
     goodreadsRatingAverage: v.optional(v.number()), // 0-5
     goodreadsRatingCount: v.optional(v.number()), // integer
     ratingScore: v.optional(v.number()), // 0-5, computed blend
+    discoveryScore: v.optional(v.number()), // 0-5, ranking score weighted by review confidence
   })
     .index('by_detailsStatus', ['detailsStatus'])
     .index('by_coverStatus', ['coverStatus'])
@@ -299,6 +326,7 @@ export default defineSchema({
     .index('by_catalogStatus', ['catalogStatus'])
     .index('by_slug', ['slug'])
     .index('by_ratingScore', ['ratingScore'])
+    .index('by_discoveryScore', ['discoveryScore'])
     .searchIndex('search_text', {
       searchField: 'searchText',
       filterFields: [],

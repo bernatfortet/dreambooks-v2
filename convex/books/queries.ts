@@ -98,10 +98,7 @@ function filterVisibleBooks<T extends Pick<Doc<'books'>, 'catalogStatus'>>(books
   return books.filter((book) => isBookVisibleForDiscovery(book))
 }
 
-async function resolveBooksWithCovers(
-  storage: { getUrl: (id: Id<'_storage'>) => Promise<string | null> },
-  books: Doc<'books'>[],
-) {
+async function resolveBooksWithCovers(storage: { getUrl: (id: Id<'_storage'>) => Promise<string | null> }, books: Doc<'books'>[]) {
   return await Promise.all(
     books.map(async (book) => {
       const cover = await resolveCover(storage, book)
@@ -110,10 +107,51 @@ async function resolveBooksWithCovers(
   )
 }
 
-function sortBooksForDiscovery<T extends Pick<Doc<'books'>, 'ratingScore' | '_creationTime'>>(books: T[]) {
+const discoveryBookValidator = v.object({
+  _id: v.id('books'),
+  title: v.string(),
+  slug: v.union(v.string(), v.null()),
+  authors: v.array(v.string()),
+  seriesPosition: v.union(v.number(), v.null()),
+  cover: v.object({
+    url: v.union(v.string(), v.null()),
+    urlThumb: v.union(v.string(), v.null()),
+    width: v.number(),
+    height: v.number(),
+    dominantColor: v.union(v.string(), v.null()),
+  }),
+})
+
+async function buildDiscoveryBooksPage(
+  storage: { getUrl: (id: Id<'_storage'>) => Promise<string | null> },
+  books: Doc<'books'>[],
+) {
+  return await Promise.all(
+    books.map(async (book) => {
+      const cover = await resolveCover(storage, book)
+
+      return {
+        _id: book._id,
+        title: book.title,
+        slug: book.slug ?? null,
+        authors: book.authors,
+        seriesPosition: book.seriesPosition ?? null,
+        cover: {
+          url: cover.url,
+          urlThumb: cover.urlThumb,
+          width: cover.width,
+          height: cover.height,
+          dominantColor: cover.dominantColor,
+        },
+      }
+    }),
+  )
+}
+
+function sortBooksForDiscovery<T extends Pick<Doc<'books'>, 'discoveryScore' | 'ratingScore' | '_creationTime'>>(books: T[]) {
   books.sort((a, b) => {
-    const scoreA = a.ratingScore ?? 0
-    const scoreB = b.ratingScore ?? 0
+    const scoreA = a.discoveryScore ?? a.ratingScore ?? 0
+    const scoreB = b.discoveryScore ?? b.ratingScore ?? 0
     if (scoreB !== scoreA) return scoreB - scoreA
     return b._creationTime - a._creationTime
   })
@@ -121,10 +159,7 @@ function sortBooksForDiscovery<T extends Pick<Doc<'books'>, 'ratingScore' | '_cr
   return books
 }
 
-function paginateCollectionPage<T extends { _id: string }>(
-  items: T[],
-  paginationOpts: { cursor: string | null; numItems: number },
-) {
+function paginateCollectionPage<T extends { _id: string }>(items: T[], paginationOpts: { cursor: string | null; numItems: number }) {
   let startIndex = 0
 
   if (paginationOpts.cursor) {
@@ -147,10 +182,7 @@ function paginateCollectionPage<T extends { _id: string }>(
   }
 }
 
-async function getBookIdsWithAwards(
-  db: DatabaseReader,
-  awardIds: Id<'awards'>[],
-) {
+async function getBookIdsWithAwards(db: DatabaseReader, awardIds: Id<'awards'>[]) {
   const bookIdsWithAwards = new Set<string>()
 
   for (const awardId of awardIds) {
@@ -174,11 +206,7 @@ type DiscoveryFilters = {
   seriesFilter?: 'all' | 'with-series' | 'standalone'
 }
 
-async function filterBooksWithDiscoveryFilters(
-  db: DatabaseReader,
-  books: Doc<'books'>[],
-  filters: DiscoveryFilters,
-) {
+async function filterBooksWithDiscoveryFilters(db: DatabaseReader, books: Doc<'books'>[], filters: DiscoveryFilters) {
   let filteredBooks = books
 
   if (filters.seriesFilter === 'with-series') {
@@ -233,19 +261,25 @@ export const listPaginated = query({
   args: {
     paginationOpts: paginationOptsValidator,
   },
+  returns: v.object({
+    page: v.array(discoveryBookValidator),
+    isDone: v.boolean(),
+    continueCursor: v.string(),
+  }),
   handler: async (context, args) => {
     const paginatedResult = await context.db
       .query('books')
-      .withIndex('by_ratingScore')
+      .withIndex('by_discoveryScore')
       .order('desc')
       .filter((q) => q.neq(q.field('catalogStatus'), 'hidden'))
       .paginate(args.paginationOpts)
 
-    const booksWithCovers = await resolveBooksWithCovers(context.storage, paginatedResult.page)
+    const page = await buildDiscoveryBooksPage(context.storage, paginatedResult.page)
 
     return {
-      ...paginatedResult,
-      page: booksWithCovers,
+      page,
+      isDone: paginatedResult.isDone,
+      continueCursor: paginatedResult.continueCursor ?? '',
     }
   },
 })
@@ -295,6 +329,11 @@ export const listPaginatedWithFilters = query({
       }),
     ),
   },
+  returns: v.object({
+    page: v.array(discoveryBookValidator),
+    isDone: v.boolean(),
+    continueCursor: v.string(),
+  }),
   handler: async (context, args) => {
     const filters = args.filters || {}
     const visibleBooks = filterVisibleBooks(await context.db.query('books').order('desc').collect())
@@ -303,12 +342,12 @@ export const listPaginatedWithFilters = query({
     sortBooksForDiscovery(allBooks)
 
     const paginatedResult = paginateCollectionPage(allBooks, args.paginationOpts)
-    const booksWithCovers = await resolveBooksWithCovers(context.storage, paginatedResult.page)
+    const page = await buildDiscoveryBooksPage(context.storage, paginatedResult.page)
 
     return {
+      page,
       continueCursor: paginatedResult.continueCursor,
       isDone: paginatedResult.isDone,
-      page: booksWithCovers,
     }
   },
 })
@@ -322,47 +361,19 @@ export const listForGrid = query({
     paginationOpts: paginationOptsValidator,
   },
   returns: v.object({
-    page: v.array(
-      v.object({
-        _id: v.id('books'),
-        title: v.string(),
-        slug: v.union(v.string(), v.null()),
-        authors: v.array(v.string()),
-        seriesPosition: v.union(v.number(), v.null()),
-        cover: v.object({
-          url: v.union(v.string(), v.null()),
-          urlThumb: v.union(v.string(), v.null()),
-        }),
-      }),
-    ),
+    page: v.array(discoveryBookValidator),
     isDone: v.boolean(),
     continueCursor: v.string(),
   }),
   handler: async (context, args) => {
     const result = await context.db
       .query('books')
-      .withIndex('by_ratingScore')
+      .withIndex('by_discoveryScore')
       .order('desc')
       .filter((q) => q.neq(q.field('catalogStatus'), 'hidden'))
       .paginate(args.paginationOpts)
 
-    const page = await Promise.all(
-      result.page.map(async (book) => {
-        const cover = await resolveCover(context.storage, book)
-
-        return {
-          _id: book._id,
-          title: book.title,
-          slug: book.slug ?? null,
-          authors: book.authors,
-          seriesPosition: book.seriesPosition ?? null,
-          cover: {
-            url: cover.url,
-            urlThumb: cover.urlThumb,
-          },
-        }
-      }),
-    )
+    const page = await buildDiscoveryBooksPage(context.storage, result.page)
 
     return {
       page,
@@ -381,24 +392,24 @@ export const get = query({
     const cover = await resolveCover(context.storage, book)
 
     // Include series info if book is linked to a series
-      let seriesInfo = null
-      if (book.seriesId) {
-        const series = (await context.db.get(book.seriesId)) as Doc<'series'> | null
-        if (series) {
-          seriesInfo = {
-            _id: series._id,
-            name: series.name,
-            slug: series.slug,
-            sourceUrl: series.sourceUrl,
-            scrapeStatus: series.scrapeStatus,
-            expectedBookCount: series.expectedBookCount,
-            discoveredBookCount: series.discoveredBookCount,
-            scrapedBookCount: series.scrapedBookCount,
-          }
+    let seriesInfo = null
+    if (book.seriesId) {
+      const series = (await context.db.get(book.seriesId)) as Doc<'series'> | null
+      if (series) {
+        seriesInfo = {
+          _id: series._id,
+          name: series.name,
+          slug: series.slug,
+          sourceUrl: series.sourceUrl,
+          scrapeStatus: series.scrapeStatus,
+          expectedBookCount: series.expectedBookCount,
+          discoveredBookCount: series.discoveredBookCount,
+          scrapedBookCount: series.scrapedBookCount,
         }
       }
+    }
 
-      return { ...book, cover, seriesInfo }
+    return { ...book, cover, seriesInfo }
   },
 })
 

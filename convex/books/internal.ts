@@ -4,6 +4,8 @@ import { Id } from '../_generated/dataModel'
 import { MutationCtx } from '../_generated/server'
 import { buildSearchText } from './lib/searchText'
 import { generateUniqueBookSlug } from '@/convex/lib/slug'
+import { computeDiscoveryScore } from '@/lib/books/discovery-score'
+import { getCoverFormatPriority, shouldReplaceStoredCover } from '@/lib/scraping/domains/book/preferred-cover'
 import { internal } from '../_generated/api'
 
 /**
@@ -237,14 +239,28 @@ async function updateExistingBook(
   const existingBook = await context.db.get(bookId)
   if (!existingBook) return { coverSourceUrlChanged: false }
 
+  const existingCover = existingBook.cover ?? {}
+  const shouldReplaceCoverSource = shouldReplaceStoredCover({
+    existingCoverSourceUrl: typeof existingCover.sourceUrl === 'string' ? existingCover.sourceUrl : undefined,
+    existingCoverSourceFormat: typeof existingCover.sourceFormat === 'string' ? existingCover.sourceFormat : undefined,
+    incomingCoverSourceUrl: args.coverSourceUrl,
+    incomingCoverSourceFormat: args.coverSourceFormat,
+  })
+
   // Track if cover source URL changed (for re-download decision)
-  const coverSourceUrlChanged = args.coverSourceUrl !== undefined && args.coverSourceUrl !== existingBook.cover?.sourceUrl
+  const coverSourceUrlChanged =
+    shouldReplaceCoverSource && args.coverSourceUrl !== undefined && args.coverSourceUrl !== existingBook.cover?.sourceUrl
 
   // Only upgrade detailsStatus, never downgrade
   const shouldUpdateDetails = shouldUpgradeDetailsStatus(existingBook.detailsStatus, args.detailsStatus)
 
   // Build searchText for full-text search
   const updatedBook = { ...existingBook, ...args, title: cleanedTitle }
+  const discoveryScore = computeDiscoveryScore({
+    ratingScore: updatedBook.ratingScore,
+    amazonRatingCount: updatedBook.amazonRatingCount,
+    goodreadsRatingCount: updatedBook.goodreadsRatingCount,
+  })
   const searchText = buildSearchText({
     title: cleanedTitle,
     subtitle: updatedBook.subtitle,
@@ -284,18 +300,27 @@ async function updateExistingBook(
     args.coverSourceAsin !== undefined
 
   if (hasCoverUpdates) {
-    const existingCover = existingBook.cover ?? {}
     const shouldPreserveMeasuredDimensions =
       (existingCover.storageIdMedium || existingCover.storageIdFull) &&
-      (args.coverSourceUrl === undefined || args.coverSourceUrl === existingCover.sourceUrl)
+      (!shouldReplaceCoverSource || args.coverSourceUrl === undefined || args.coverSourceUrl === existingCover.sourceUrl)
+
+    if (args.coverSourceUrl && !shouldReplaceCoverSource && existingCover.sourceUrl) {
+      console.log('⏭️ Preserving preferred existing cover', {
+        bookId,
+        existingFormat: existingCover.sourceFormat ?? 'unknown',
+        incomingFormat: args.coverSourceFormat ?? 'unknown',
+        existingPriority: getCoverFormatPriority(typeof existingCover.sourceFormat === 'string' ? existingCover.sourceFormat : undefined),
+        incomingPriority: getCoverFormatPriority(args.coverSourceFormat),
+      })
+    }
 
     updates.cover = {
       ...existingCover,
-      ...(args.coverSourceUrl !== undefined && { sourceUrl: args.coverSourceUrl }),
-      ...(!shouldPreserveMeasuredDimensions && args.coverWidth !== undefined && { width: args.coverWidth }),
-      ...(!shouldPreserveMeasuredDimensions && args.coverHeight !== undefined && { height: args.coverHeight }),
-      ...(args.coverSourceFormat !== undefined && { sourceFormat: args.coverSourceFormat }),
-      ...(args.coverSourceAsin !== undefined && { sourceAsin: args.coverSourceAsin }),
+      ...(shouldReplaceCoverSource && args.coverSourceUrl !== undefined && { sourceUrl: args.coverSourceUrl }),
+      ...(shouldReplaceCoverSource && !shouldPreserveMeasuredDimensions && args.coverWidth !== undefined && { width: args.coverWidth }),
+      ...(shouldReplaceCoverSource && !shouldPreserveMeasuredDimensions && args.coverHeight !== undefined && { height: args.coverHeight }),
+      ...(shouldReplaceCoverSource && args.coverSourceFormat !== undefined && { sourceFormat: args.coverSourceFormat }),
+      ...(shouldReplaceCoverSource && args.coverSourceAsin !== undefined && { sourceAsin: args.coverSourceAsin }),
     }
   }
 
@@ -311,6 +336,7 @@ async function updateExistingBook(
   if (args.goodreadsRatingAverage !== undefined) updates.goodreadsRatingAverage = args.goodreadsRatingAverage
   if (args.goodreadsRatingCount !== undefined) updates.goodreadsRatingCount = args.goodreadsRatingCount
   if (args.ratingScore !== undefined) updates.ratingScore = args.ratingScore
+  updates.discoveryScore = discoveryScore
   if (args.scrapeVersion !== undefined) updates.scrapeVersion = args.scrapeVersion
   // Only set firstSeenFromUrl/firstSeenReason if book doesn't already have them (preserve original provenance)
   if (args.firstSeenFromUrl !== undefined && !existingBook.firstSeenFromUrl) {
@@ -425,6 +451,11 @@ async function insertNewBook(
     ...(args.goodreadsRatingAverage !== undefined && { goodreadsRatingAverage: args.goodreadsRatingAverage }),
     ...(args.goodreadsRatingCount !== undefined && { goodreadsRatingCount: args.goodreadsRatingCount }),
     ...(args.ratingScore !== undefined && { ratingScore: args.ratingScore }),
+    discoveryScore: computeDiscoveryScore({
+      ratingScore: args.ratingScore,
+      amazonRatingCount: args.amazonRatingCount,
+      goodreadsRatingCount: args.goodreadsRatingCount,
+    }),
     ...(args.scrapeVersion !== undefined && { scrapeVersion: args.scrapeVersion }),
     ...(args.firstSeenFromUrl !== undefined && { firstSeenFromUrl: args.firstSeenFromUrl }),
     ...(args.firstSeenReason !== undefined && { firstSeenReason: args.firstSeenReason }),
@@ -511,10 +542,9 @@ function buildCoverObject(args: {
 }
 
 /**
- * Backfill missing ratingScore values to 0 for existing books.
- * Run once after deployment to ensure consistent sorting.
+ * Backfill discovery scores after changing discovery ranking logic.
  */
-export const backfillRatingScores = internalMutation({
+export const backfillDiscoveryScores = internalMutation({
   args: {},
   returns: v.object({
     updated: v.number(),
@@ -524,8 +554,18 @@ export const backfillRatingScores = internalMutation({
     let updated = 0
 
     for (const book of books) {
-      if (book.ratingScore === undefined) {
-        await context.db.patch(book._id, { ratingScore: 0 })
+      const ratingScore = book.ratingScore ?? 0
+      const discoveryScore = computeDiscoveryScore({
+        ratingScore,
+        amazonRatingCount: book.amazonRatingCount,
+        goodreadsRatingCount: book.goodreadsRatingCount,
+      })
+
+      if (book.ratingScore !== ratingScore || book.discoveryScore !== discoveryScore) {
+        await context.db.patch(book._id, {
+          ratingScore,
+          discoveryScore,
+        })
         updated++
       }
     }
