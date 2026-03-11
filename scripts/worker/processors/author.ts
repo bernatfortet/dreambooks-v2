@@ -9,14 +9,13 @@ import { api } from '@/convex/_generated/api'
 type ProcessAuthorResult = {
   success: boolean
   authorId?: string
-  seriesAdded?: number
   booksDiscovered?: number
   booksLinked?: number
 }
 
 /**
  * Process an author URL from the queue.
- * Scrapes the author page and discovers series to add to queue.
+ * Scrapes the author page and optionally discovers that author's books.
  */
 export async function processAuthorFromQueue(params: {
   item: QueueItem
@@ -179,28 +178,28 @@ async function processAuthorAttempt(params: {
       return { success: false }
     }
 
-    const skipDiscoveries = item.skipBookDiscoveries
+    const shouldQueueBookDiscoveries = shouldQueueAuthorBookDiscoveries(item)
+    const skipDiscoveries = item.skipBookDiscoveries || !shouldQueueBookDiscoveries
 
-    let seriesAdded = 0
     let booksDiscovered = 0
 
     if (skipDiscoveries) {
-      log(`   ⏭️ Skipping discoveries (skipBookDiscoveries=true)`)
+      if (item.skipBookDiscoveries) {
+        log(`   ⏭️ Skipping discoveries (skipBookDiscoveries=true)`)
+      } else {
+        log(`   ⏭️ Skipping downstream discovery for discovered author`)
+      }
     } else {
       const discoveries = discoverAuthorLinks(authorData)
 
       if (discoveries.length > 0) {
         log(`   🔗 Found ${discoveries.length} discoveries:`)
-        const seriesCount = discoveries.filter((d) => d.type === 'series').length
         const bookCount = discoveries.filter((d) => d.type === 'book').length
-        log(`      - ${seriesCount} series, ${bookCount} books`)
+        log(`      - ${bookCount} books`)
 
-        if (!dryRun) {
-          const queued = await queueDiscoveries(discoveries, item.url)
-          log(`   ✅ Queued ${queued} discoveries`)
-        }
+        const queued = await queueDiscoveries(discoveries, item.url)
+        log(`   ✅ Queued ${queued} discoveries`)
 
-        seriesAdded = seriesCount
         booksDiscovered = bookCount
       }
     }
@@ -216,7 +215,7 @@ async function processAuthorAttempt(params: {
     log('─'.repeat(60))
     log('')
 
-    return { success: true, authorId, seriesAdded, booksDiscovered, booksLinked }
+    return { success: true, authorId, booksDiscovered, booksLinked }
   } catch (error) {
     if (isClosedError(error)) {
       const recoveredPage = await reconnectPageForRetry({
@@ -236,4 +235,8 @@ async function processAuthorAttempt(params: {
 
     throw error
   }
+}
+
+function shouldQueueAuthorBookDiscoveries(item: QueueItem): boolean {
+  return item.source === 'user'
 }

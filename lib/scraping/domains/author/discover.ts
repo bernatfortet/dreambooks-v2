@@ -3,26 +3,13 @@ import type { Discovery } from '@/lib/scraping/types'
 
 /**
  * Extract discoveries from parsed author data.
- * Returns links to series and books discovered from the author page.
+ * Returns links to books discovered from the author page.
+ *
+ * Author scrapes are a terminal expansion point for an explicit author
+ * request. They should not fan back out into series scrapes.
  */
 export function discoverAuthorLinks(data: AuthorData): Discovery[] {
   const discoveries: Discovery[] = []
-
-  // Series discoveries
-  // Cap to prevent queue floods (max 20 series per author scrape)
-  const cappedSeries = data.series.slice(0, 20)
-
-  for (const series of cappedSeries) {
-    if (series.amazonUrl) {
-      discoveries.push({
-        type: 'series',
-        url: series.amazonUrl,
-        metadata: { name: series.name ?? undefined },
-        priority: 25,
-        source: 'author-page',
-      })
-    }
-  }
 
   // Book discoveries
   // Keep all books found on the author page; queue mutation still applies a global cap.

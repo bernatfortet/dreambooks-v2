@@ -19,6 +19,11 @@ import { api } from '@/convex/_generated/api'
 dotenv.config({ path: '.env.local' })
 dotenv.config()
 
+const scrapeImportKey = process.env.SCRAPE_IMPORT_KEY
+if (!scrapeImportKey) {
+  throw new Error('SCRAPE_IMPORT_KEY environment variable is not set')
+}
+
 // Mock data for testing discovery extractors
 const mockBookData = {
   title: 'Test Book',
@@ -106,15 +111,10 @@ async function testDiscoveryExtraction() {
   const bookDiscoveries = discoverBookLinks(mockBookData)
   console.log(`   Found ${bookDiscoveries.length} discoveries`)
 
-  const seriesDiscovery = bookDiscoveries.find((d) => d.type === 'series')
   const authorDiscoveries = bookDiscoveries.filter((d) => d.type === 'author')
 
-  if (!seriesDiscovery) {
-    console.error('   ❌ FAILED: No series discovery found')
-    return false
-  }
-  if (seriesDiscovery.priority !== 20 || seriesDiscovery.source !== 'book-series-link') {
-    console.error('   ❌ FAILED: Series discovery has wrong priority/source')
+  if (bookDiscoveries.some((d) => d.type === 'series')) {
+    console.error('   ❌ FAILED: Book discovery should not queue series')
     return false
   }
   if (authorDiscoveries.length !== 2) {
@@ -152,23 +152,17 @@ async function testDiscoveryExtraction() {
   // Test 3: Author discovery (capping)
   console.log('Test 1.3: Author Discovery Extraction (Capping)')
   const authorPageDiscoveries = discoverAuthorLinks(mockAuthorData)
-  console.log(
-    `   Found ${authorPageDiscoveries.length} discoveries (${mockAuthorData.series.length} series, ${mockAuthorData.books.length} books)`,
-  )
+  console.log(`   Found ${authorPageDiscoveries.length} discoveries (${mockAuthorData.books.length} books)`)
 
   const seriesDisc = authorPageDiscoveries.filter((d) => d.type === 'series')
   const bookDisc = authorPageDiscoveries.filter((d) => d.type === 'book')
 
-  if (seriesDisc.length > 20) {
-    console.error(`   ❌ FAILED: Series discoveries not capped (got ${seriesDisc.length}, max 20)`)
+  if (seriesDisc.length !== 0) {
+    console.error(`   ❌ FAILED: Author discovery should not queue series (got ${seriesDisc.length})`)
     return false
   }
-  if (bookDisc.length > 30) {
-    console.error(`   ❌ FAILED: Book discoveries not capped (got ${bookDisc.length}, max 30)`)
-    return false
-  }
-  if (seriesDisc.some((d) => d.priority !== 25 || d.source !== 'author-page')) {
-    console.error('   ❌ FAILED: Series discoveries have wrong priority/source')
+  if (bookDisc.length !== mockAuthorData.books.length) {
+    console.error(`   ❌ FAILED: Expected ${mockAuthorData.books.length} book discoveries, got ${bookDisc.length}`)
     return false
   }
   if (bookDisc.some((d) => d.priority !== 35 || d.source !== 'author-page')) {
@@ -209,6 +203,7 @@ async function testQueueIntegration() {
 
   // Add URL manually first
   await client.mutation(api.scrapeQueue.mutations.enqueue, {
+    apiKey: scrapeImportKey,
     url: testUrl,
     type: 'book',
     source: 'user',

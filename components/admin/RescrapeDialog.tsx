@@ -41,7 +41,7 @@ const SKIP_OPTIONS_BY_TYPE: Record<EntityType, Array<{ key: keyof SkipOptions; l
     { key: 'skipCoverDownload', label: 'Skip cover download' },
   ],
   author: [
-    { key: 'skipBookDiscoveries', label: 'Skip discoveries (don\'t queue series/books)' },
+    { key: 'skipBookDiscoveries', label: 'Skip book discoveries (don\'t queue books)' },
     { key: 'skipCoverDownload', label: 'Skip image download' },
   ],
 }

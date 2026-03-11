@@ -5,21 +5,13 @@ import { toSlug } from '@/lib/scraping/utils/slug'
 
 /**
  * Extract discoveries from parsed book data.
- * Returns links to series and authors discovered from the book page.
+ * Returns links to authors discovered from the book page.
+ *
+ * Book scrapes should not expand into series scrapes. We already persist
+ * series linkage during book import when series metadata is present.
  */
 export function discoverBookLinks(data: BookData): Discovery[] {
   const discoveries: Discovery[] = []
-
-  // Series discovery
-  if (data.seriesUrl && data.seriesName) {
-    discoveries.push({
-      type: 'series',
-      url: data.seriesUrl,
-      metadata: { name: data.seriesName },
-      priority: 20,
-      source: 'book-series-link',
-    })
-  }
 
   // Author discoveries from amazonAuthorIds
   // Names and IDs should be in the same order from extraction

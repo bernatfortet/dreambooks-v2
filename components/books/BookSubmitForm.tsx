@@ -7,7 +7,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
-type UrlType = 'auto' | 'book' | 'series'
+type UrlType = 'auto' | 'book' | 'series' | 'author'
+
+const AUTHOR_URL_PATTERNS = [/\/e\/([A-Z0-9]+)/i, /\/author\//i]
+const SERIES_URL_PATTERNS = [/[?&]series=([A-Z0-9]+)/i, /\/gp\/series\/([A-Z0-9]+)/i, /\/kindle-dbs\/series/i]
 
 type BookSubmitFormProps = {
   url: string
@@ -19,13 +22,14 @@ export function BookSubmitForm({ url, onUrlChange }: BookSubmitFormProps) {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [urlType, setUrlType] = useState<UrlType>('auto')
+  const trimmedUrl = url.trim()
 
   const enqueueUrl = useMutation(api.scrapeQueue.mutations.enqueue)
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
 
-    if (!url.trim()) return
+    if (!trimmedUrl) return
 
     setIsLoading(true)
     setError(null)
@@ -33,10 +37,10 @@ export function BookSubmitForm({ url, onUrlChange }: BookSubmitFormProps) {
 
     try {
       // Use manual type if specified, otherwise auto-detect
-      const type = urlType === 'auto' ? detectUrlType(url.trim()) : urlType
+      const type = urlType === 'auto' ? detectUrlType(trimmedUrl) : urlType
 
       const result = await enqueueUrl({
-        url: url.trim(),
+        url: trimmedUrl,
         type,
         scrapeFullSeries: true,
         source: 'user',
@@ -69,14 +73,14 @@ export function BookSubmitForm({ url, onUrlChange }: BookSubmitFormProps) {
     }
   }
 
-  const detectedType = detectUrlType(url.trim())
+  const detectedType = detectUrlType(trimmedUrl)
 
   return (
     <div className='space-y-2'>
       <form onSubmit={handleSubmit} className='flex gap-2'>
         <Input
           type='url'
-          placeholder='Enter Amazon URL (book or series)'
+          placeholder='Enter Amazon URL (book, series, or author)'
           value={url}
           onChange={(e) => onUrlChange(e.target.value)}
           disabled={isLoading}
@@ -91,10 +95,11 @@ export function BookSubmitForm({ url, onUrlChange }: BookSubmitFormProps) {
             <SelectItem value='auto'>Auto ({detectedType})</SelectItem>
             <SelectItem value='book'>Book</SelectItem>
             <SelectItem value='series'>Series</SelectItem>
+            <SelectItem value='author'>Author</SelectItem>
           </SelectContent>
         </Select>
 
-        <Button type='submit' disabled={isLoading || !url.trim()}>
+        <Button type='submit' disabled={isLoading || !trimmedUrl}>
           {isLoading ? 'Adding...' : 'Add'}
         </Button>
       </form>
@@ -105,14 +110,18 @@ export function BookSubmitForm({ url, onUrlChange }: BookSubmitFormProps) {
   )
 }
 
-function detectUrlType(url: string): 'book' | 'series' {
+function detectUrlType(url: string): 'book' | 'series' | 'author' {
+  for (const pattern of AUTHOR_URL_PATTERNS) {
+    if (pattern.test(url)) {
+      return 'author'
+    }
+  }
+
   // Series URL patterns from Amazon:
   // - ?series=XXXXXXXXXX
   // - /gp/series/XXXXXXXXXX
   // - /kindle-dbs/series?...&asin=XXXXXXXXXX
-  const seriesPatterns = [/[?&]series=([A-Z0-9]+)/i, /\/gp\/series\/([A-Z0-9]+)/i, /\/kindle-dbs\/series/i]
-
-  for (const pattern of seriesPatterns) {
+  for (const pattern of SERIES_URL_PATTERNS) {
     if (pattern.test(url)) {
       return 'series'
     }

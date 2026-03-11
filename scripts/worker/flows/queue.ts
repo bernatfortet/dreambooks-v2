@@ -74,9 +74,7 @@ export async function processQueueFlow(params: { page: Page; pageManager?: PageM
         success = result.success
         if (result.success) {
           workDone = true
-          log(
-            `   📊 Linked ${result.booksLinked ?? 0} book(s), discovered ${result.booksDiscovered ?? 0} books and ${result.seriesAdded ?? 0} series`,
-          )
+          log(`   📊 Linked ${result.booksLinked ?? 0} book(s), discovered ${result.booksDiscovered ?? 0} books`)
         }
       }
     } catch (error) {
