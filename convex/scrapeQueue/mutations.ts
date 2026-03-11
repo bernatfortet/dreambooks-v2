@@ -232,6 +232,9 @@ export const enqueue = mutation({
       bookIntakeId: args.bookIntakeId,
       createdAt: Date.now(),
     })
+    await trackScrapeQueueStatusChange(context, {
+      nextStatus: 'pending',
+    })
 
     console.log('📋 Added to scrape queue', { url: cleanedUrl, type: args.type, queueId })
 
@@ -255,6 +258,10 @@ export const markProcessing = mutation({
     await context.db.patch(args.queueId, {
       status: 'processing',
       startedAt: Date.now(),
+    })
+    await trackScrapeQueueStatusChange(context, {
+      previousStatus: 'pending',
+      nextStatus: 'processing',
     })
     return null
   },
@@ -303,6 +310,10 @@ export const claimItem = mutation({
       startedAt: now,
       attemptCount: (item.attemptCount ?? 0) + 1,
     })
+    await trackScrapeQueueStatusChange(context, {
+      previousStatus: item.status,
+      nextStatus: 'processing',
+    })
 
     return { success: true }
   },
@@ -332,6 +343,10 @@ export const markComplete = mutation({
       seriesId: args.seriesId,
       authorId: args.authorId,
       completedAt: Date.now(),
+    })
+    await trackScrapeQueueStatusChange(context, {
+      previousStatus: queueItem.status,
+      nextStatus: 'complete',
     })
 
     if (queueItem.bookIntakeId && args.bookId) {
@@ -367,6 +382,10 @@ export const markError = mutation({
       errorMessage: args.errorMessage,
       completedAt: Date.now(),
     })
+    await trackScrapeQueueStatusChange(context, {
+      previousStatus: queueItem.status,
+      nextStatus: 'error',
+    })
 
     if (queueItem.bookIntakeId) {
       await context.runMutation(internal.bookIntake.mutations.markScrapeFailed, {
@@ -375,6 +394,46 @@ export const markError = mutation({
         errorMessage: args.errorMessage,
       })
     }
+
+    return null
+  },
+})
+
+export const retryFailed = mutation({
+  args: {
+    apiKey: v.optional(v.string()),
+    queueId: v.id('scrapeQueue'),
+  },
+  returns: v.null(),
+  handler: async (context, args) => {
+    await requireQueueAdminAccess(context, args.apiKey)
+
+    const queueItem = await context.db.get(args.queueId)
+    if (!queueItem) return null
+
+    if (queueItem.status !== 'error') {
+      throw new Error('Only failed scrape queue items can be retried')
+    }
+
+    const conflictingItem = await findRetryConflict(context, {
+      queueId: args.queueId,
+      url: queueItem.url,
+    })
+
+    if (conflictingItem) {
+      throw new Error(`This URL already has a ${conflictingItem.status} queue item`)
+    }
+
+    await context.db.patch(args.queueId, createRetryPatch())
+    await trackScrapeQueueStatusChange(context, {
+      previousStatus: 'error',
+      nextStatus: 'pending',
+    })
+
+    console.log('🔄 Retrying failed scrape queue item', {
+      queueId: args.queueId,
+      url: queueItem.url,
+    })
 
     return null
   },
@@ -430,6 +489,9 @@ export const remove = mutation({
     if (!item) return null
 
     await context.db.delete(args.queueId)
+    await trackScrapeQueueStatusChange(context, {
+      previousStatus: item.status,
+    })
     console.log('📋 Removed from scrape queue', { url: item.url, queueId: args.queueId })
 
     return null
@@ -530,6 +592,13 @@ export const enqueueDiscoveries = mutation({
       queued++
     }
 
+    if (queued > 0) {
+      await trackScrapeQueueStatusChange(context, {
+        nextStatus: 'pending',
+        count: queued,
+      })
+    }
+
     // Build skip summary
     const skipParts: string[] = []
     if (skipReasons.blocked > 0) skipParts.push(`${skipReasons.blocked} blocked`)
@@ -569,6 +638,9 @@ export const clearOld = mutation({
       await context.db.delete(item._id)
     }
 
+    const statusCounts = countQueueItemsByStatus(oldItems)
+    await applyQueueStatusCountRemovals(context, statusCounts)
+
     return oldItems.length
   },
 })
@@ -593,6 +665,9 @@ export const deleteQueueItems = mutation({
     for (const item of existingItems) {
       await context.db.delete(item._id)
     }
+
+    const statusCounts = countQueueItemsByStatus(existingItems)
+    await applyQueueStatusCountRemovals(context, statusCounts)
 
     if (existingItems.length > 0) {
       console.log('🗑️ Deleted queue items for re-scraping', {
@@ -633,6 +708,11 @@ export const recoverExpiredLeases = internalMutation({
     }
 
     if (expiredItems.length > 0) {
+      await trackScrapeQueueStatusChange(context, {
+        previousStatus: 'processing',
+        nextStatus: 'pending',
+        count: expiredItems.length,
+      })
       console.log(`🔄 Recovered ${expiredItems.length} expired lease(s)`)
     }
 
@@ -815,6 +895,9 @@ async function queueExplicitRescrapeByUrl(
     await context.db.delete(item._id)
   }
 
+  const removedStatusCounts = countQueueItemsByStatus(existingItems)
+  await applyQueueStatusCountRemovals(context, removedStatusCounts)
+
   const queueId = await context.db.insert('scrapeQueue', {
     url: cleanedUrl,
     type: args.entityType,
@@ -832,6 +915,9 @@ async function queueExplicitRescrapeByUrl(
     skipBookDiscoveries: args.skipBookDiscoveries,
     skipCoverDownload: args.skipCoverDownload,
     createdAt: Date.now(),
+  })
+  await trackScrapeQueueStatusChange(context, {
+    nextStatus: 'pending',
   })
 
   console.log('🔄 Queued for re-scrape', { entityType: args.entityType, url: cleanedUrl, queueId })
@@ -864,4 +950,79 @@ function extractEntityInfo(entityType: 'book' | 'series' | 'author', entity: Rec
     displayName: entity.name as string | undefined,
     displayImageUrl: image?.sourceImageUrl,
   }
+}
+
+async function findRetryConflict(
+  context: MutationCtx,
+  params: {
+    queueId: Id<'scrapeQueue'>
+    url: string
+  },
+) {
+  return await context.db
+    .query('scrapeQueue')
+    .withIndex('by_url', (query) => query.eq('url', params.url))
+    .filter((query) =>
+      query.and(
+        query.neq(query.field('_id'), params.queueId),
+        query.or(
+          query.eq(query.field('status'), 'pending'),
+          query.eq(query.field('status'), 'processing'),
+          query.eq(query.field('status'), 'complete'),
+        ),
+      ),
+    )
+    .first()
+}
+
+function createRetryPatch() {
+  return {
+    status: 'pending' as const,
+    errorMessage: undefined,
+    bookId: undefined,
+    seriesId: undefined,
+    authorId: undefined,
+    workerId: undefined,
+    leaseExpiresAt: undefined,
+    startedAt: undefined,
+    completedAt: undefined,
+    createdAt: Date.now(),
+  }
+}
+
+async function trackScrapeQueueStatusChange(
+  context: MutationCtx,
+  params: {
+    previousStatus?: 'pending' | 'processing' | 'complete' | 'error'
+    nextStatus?: 'pending' | 'processing' | 'complete' | 'error'
+    count?: number
+  },
+) {
+  if (params.previousStatus === params.nextStatus) return
+
+  await context.runMutation(internal.systemStats.mutations.adjustScrapeQueueStatus, params)
+}
+
+async function applyQueueStatusCountRemovals(
+  context: MutationCtx,
+  counts: Partial<Record<'pending' | 'processing' | 'complete' | 'error', number>>,
+) {
+  for (const [status, count] of Object.entries(counts)) {
+    if (!count) continue
+
+    await trackScrapeQueueStatusChange(context, {
+      previousStatus: status as 'pending' | 'processing' | 'complete' | 'error',
+      count,
+    })
+  }
+}
+
+function countQueueItemsByStatus(items: Array<{ status: 'pending' | 'processing' | 'complete' | 'error' }>) {
+  const counts: Partial<Record<'pending' | 'processing' | 'complete' | 'error', number>> = {}
+
+  for (const item of items) {
+    counts[item.status] = (counts[item.status] ?? 0) + 1
+  }
+
+  return counts
 }
