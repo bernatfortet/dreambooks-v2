@@ -3,7 +3,7 @@ import { parseSeriesFromPage } from '@/lib/scraping/domains/series/parse'
 import { discoverSeriesLinks } from '@/lib/scraping/domains/series/discover'
 import { normalizeSeriesUrlForScraping } from '@/lib/scraping/utils/amazon-url'
 import { SCRAPE_VERSIONS } from '@/lib/scraping/config'
-import { navigateWithRetry } from '../browser'
+import { type PageManager, isClosedError, navigateWithRetry, reconnectPageForRetry, recoverPageIfClosed } from '../browser'
 import { truncate, incrementScrapingCount, log } from '../utils'
 import {
   getConvexClient,
@@ -36,6 +36,7 @@ type ProcessSeriesParams = {
         skipCoverDownload?: boolean
       }
   page: Page
+  pageManager?: PageManager
   dryRun: boolean
   // If provided, this is NOT a real queue item - it's a series being scraped directly
   seriesId?: Id<'series'>
@@ -59,162 +60,229 @@ export async function processSeriesFromQueue(params: ProcessSeriesParams): Promi
   log(`📚 Processing series: ${truncate(normalizedUrl, 60)}`)
   log('─'.repeat(60))
 
+  return await processSeriesAttempt({
+    ...params,
+    page,
+    dryRun,
+    normalizedUrl,
+    isFromQueue,
+    attempt: 1,
+  })
+}
+
+async function processSeriesAttempt(
+  params: ProcessSeriesParams & {
+    normalizedUrl: string
+    isFromQueue: boolean
+    attempt: number
+  },
+): Promise<ProcessSeriesResult> {
+  const {
+    item,
+    page,
+    pageManager,
+    dryRun,
+    seriesId: existingSeriesId,
+    normalizedUrl,
+    isFromQueue,
+    attempt,
+  } = params
+
   const client = getConvexClient()
 
-  // Helper to handle errors appropriately based on source
   async function handleError(message: string) {
     if (dryRun) return
     if (isFromQueue) {
       await markQueueItemError(item._id as Id<'scrapeQueue'>, message)
-    } else if (existingSeriesId) {
-      await client.mutation(api.series.mutations.markError, {
-        seriesId: existingSeriesId,
-        errorMessage: message,
-      })
+      return
     }
-  }
+    if (!existingSeriesId) return
 
-  // Navigate to series page
-  const navResult = await navigateWithRetry({ page, url: normalizedUrl })
-  if (!navResult.success) {
-    await handleError('Navigation failed')
-    return { success: false }
-  }
-
-  // Parse series data
-  const seriesData = await parseSeriesFromPage(page)
-
-  if (!seriesData.name) {
-    log(`   ⚠️ Failed to extract series name`)
-    await handleError('Failed to extract series name')
-    return { success: false }
-  }
-
-  // Backfill queue preview metadata for user-enqueued items (discovery items already include it).
-  if (isFromQueue && !dryRun) {
-    await client.mutation(api.scrapeQueue.mutations.updatePreview, {
-      queueId: item._id as Id<'scrapeQueue'>,
-      displayName: seriesData.name ?? undefined,
-      displayImageUrl: seriesData.coverImageUrl ?? undefined,
+    await client.mutation(api.series.mutations.markError, {
+      seriesId: existingSeriesId,
+      errorMessage: message,
     })
   }
-
-  log(`   ✅ Parsed: ${seriesData.name}`)
-  log(`   Books found: ${seriesData.books.length}`)
-  log(`   Total books: ${seriesData.totalBooks ?? 'Unknown'}`)
-
-  if (dryRun) {
-    log(`   🏁 Would save (dry run)`)
-    return { success: true, booksProcessed: seriesData.books.length }
-  }
-
-  // Create/update series in Convex
-  let seriesId: Id<'series'>
 
   try {
-    const referrerUrl = isFromQueue && 'referrerUrl' in item ? item.referrerUrl : undefined
-    const referrerReason = isFromQueue && 'referrerReason' in item ? item.referrerReason : undefined
+    const navResult = await navigateWithRetry({ page, url: normalizedUrl })
+    if (!navResult.success) {
+      const recoveredPage =
+        navResult.needsReconnect
+          ? await reconnectPageForRetry({
+              attempt,
+              pageManager,
+              reason: 'Page closed during series navigation',
+            })
+          : null
 
-    seriesId =
-      existingSeriesId ??
-      (await client.mutation(api.series.mutations.upsertFromUrl, {
-        name: seriesData.name,
-        sourceUrl: item.url,
-        description: seriesData.description ?? undefined,
-        coverImageUrl: seriesData.coverImageUrl ?? undefined,
-        skipCoverDownload: item.skipCoverDownload,
-        firstSeenFromUrl: referrerUrl,
-        firstSeenReason: referrerReason,
-      }))
+      if (recoveredPage) {
+        return await processSeriesAttempt({
+          ...params,
+          page: recoveredPage,
+          attempt: attempt + 1,
+        })
+      }
 
-    // When using existing series ID, ensure cover is scheduled if needed
-    // (upsertFromUrl handles this normally, but we skip it when existingSeriesId is provided)
-    if (existingSeriesId && seriesData.coverImageUrl && !item.skipCoverDownload) {
-      await client.mutation(api.series.mutations.scheduleCoverDownload, {
-        seriesId: existingSeriesId,
-        coverImageUrl: seriesData.coverImageUrl,
+      await handleError('Navigation failed')
+      return { success: false }
+    }
+
+    const seriesData = await parseSeriesFromPage(page)
+
+    if (!seriesData.name) {
+      const recoveredPage = await recoverPageIfClosed({
+        attempt,
+        page,
+        pageManager,
+        reason: 'series parsing',
+      })
+
+      if (recoveredPage) {
+        return await processSeriesAttempt({
+          ...params,
+          page: recoveredPage,
+          attempt: attempt + 1,
+        })
+      }
+
+      log(`   ⚠️ Failed to extract series name`)
+      await handleError('Failed to extract series name')
+      return { success: false }
+    }
+
+    if (isFromQueue && !dryRun) {
+      await client.mutation(api.scrapeQueue.mutations.updatePreview, {
+        queueId: item._id as Id<'scrapeQueue'>,
+        displayName: seriesData.name ?? undefined,
+        displayImageUrl: seriesData.coverImageUrl ?? undefined,
       })
     }
 
-    log(`   ✅ Series created/updated: ${seriesId}`)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    log(`   🚨 Failed to create series: ${message}`)
-    await handleError(message)
-    return { success: false }
-  }
+    log(`   ✅ Parsed: ${seriesData.name}`)
+    log(`   Books found: ${seriesData.books.length}`)
+    log(`   Total books: ${seriesData.totalBooks ?? 'Unknown'}`)
 
-  // Extract discoveries and queue them (respecting skip options)
-  const skipBookDiscoveries = 'skipBookDiscoveries' in item && item.skipBookDiscoveries
-
-  if (skipBookDiscoveries) {
-    log(`   ⏭️ Skipping book discoveries (skipBookDiscoveries=true)`)
-  } else {
-    const discoveries = discoverSeriesLinks(seriesData)
-
-    if (discoveries.length > 0) {
-      log(`   🔗 Found ${discoveries.length} book discoveries`)
-      if (!dryRun) {
-        const queued = await queueDiscoveries(discoveries, item.url)
-        log(`   ✅ Queued ${queued} book discoveries`)
-      }
+    if (dryRun) {
+      log(`   🏁 Would save (dry run)`)
+      return { success: true, booksProcessed: seriesData.books.length }
     }
-  }
 
-  let booksProcessed = 0
+    let seriesId: Id<'series'>
 
-  // Always save series scrape results to set scrapeVersion (prevents version upgrade loop)
-  // When scrapeFullSeries=true, books are scraped separately via discoveries
-  // When scrapeFullSeries=false, books are created directly from the series page data
-  const booksForSave = item.scrapeFullSeries
-    ? [] // Books will be scraped separately
-    : seriesData.books
-        .filter((book) => book.amazonUrl && book.format !== 'audiobook')
-        .map((book) => ({
-          title: book.title ?? 'Unknown Title',
-          amazonUrl: book.amazonUrl!,
-          asin: book.asin ?? undefined,
-          position: book.position ?? undefined,
-          coverImageUrl: book.coverImageUrl ?? undefined,
-          authors: book.authors && book.authors.length > 0 ? book.authors : undefined,
+    try {
+      const referrerUrl = isFromQueue && 'referrerUrl' in item ? item.referrerUrl : undefined
+      const referrerReason = isFromQueue && 'referrerReason' in item ? item.referrerReason : undefined
+
+      seriesId =
+        existingSeriesId ??
+        (await client.mutation(api.series.mutations.upsertFromUrl, {
+          name: seriesData.name,
+          sourceUrl: item.url,
+          description: seriesData.description ?? undefined,
+          coverImageUrl: seriesData.coverImageUrl ?? undefined,
+          skipCoverDownload: item.skipCoverDownload,
+          firstSeenFromUrl: referrerUrl,
+          firstSeenReason: referrerReason,
         }))
 
-  // Count non-audiobook books as discovered (matches what we'd save if not using scrapeFullSeries)
-  const discoveredBookCount = seriesData.books.filter((book) => book.amazonUrl && book.format !== 'audiobook').length
+      if (existingSeriesId && seriesData.coverImageUrl && !item.skipCoverDownload) {
+        await client.mutation(api.series.mutations.scheduleCoverDownload, {
+          seriesId: existingSeriesId,
+          coverImageUrl: seriesData.coverImageUrl,
+        })
+      }
 
-  await saveSeriesFromScrape(seriesId, {
-    seriesName: seriesData.name,
-    sourceUrl: item.url,
-    description: seriesData.description ?? undefined,
-    coverImageUrl: seriesData.coverImageUrl ?? undefined,
-    expectedBookCount: seriesData.totalBooks ?? undefined,
-    discoveredBookCount,
-    skipCoverDownload: item.skipCoverDownload,
-    scrapeVersion: SCRAPE_VERSIONS.series,
-    books: booksForSave,
-    pagination: seriesData.pagination
-      ? {
-          currentPage: seriesData.pagination.currentPage,
-          totalPages: seriesData.pagination.totalPages ?? undefined,
-          nextPageUrl: seriesData.pagination.nextPageUrl ?? undefined,
+      log(`   ✅ Series created/updated: ${seriesId}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      log(`   🚨 Failed to create series: ${message}`)
+      await handleError(message)
+      return { success: false }
+    }
+
+    const skipBookDiscoveries = 'skipBookDiscoveries' in item && item.skipBookDiscoveries
+
+    if (skipBookDiscoveries) {
+      log(`   ⏭️ Skipping book discoveries (skipBookDiscoveries=true)`)
+    } else {
+      const discoveries = discoverSeriesLinks(seriesData)
+
+      if (discoveries.length > 0) {
+        log(`   🔗 Found ${discoveries.length} book discoveries`)
+        if (!dryRun) {
+          const queued = await queueDiscoveries(discoveries, item.url)
+          log(`   ✅ Queued ${queued} book discoveries`)
         }
-      : undefined,
-  })
+      }
+    }
 
-  booksProcessed = booksForSave.length
+    const booksForSave = item.scrapeFullSeries
+      ? []
+      : seriesData.books
+          .filter((book) => book.amazonUrl && book.format !== 'audiobook')
+          .map((book) => ({
+            title: book.title ?? 'Unknown Title',
+            amazonUrl: book.amazonUrl!,
+            asin: book.asin ?? undefined,
+            position: book.position ?? undefined,
+            coverImageUrl: book.coverImageUrl ?? undefined,
+            authors: book.authors && book.authors.length > 0 ? book.authors : undefined,
+          }))
 
-  // Mark queue item complete (only if from queue)
-  if (isFromQueue) {
-    await markQueueItemComplete({
-      queueId: item._id as Id<'scrapeQueue'>,
-      seriesId,
+    const discoveredBookCount = seriesData.books.filter((book) => book.amazonUrl && book.format !== 'audiobook').length
+
+    await saveSeriesFromScrape(seriesId, {
+      seriesName: seriesData.name,
+      sourceUrl: item.url,
+      description: seriesData.description ?? undefined,
+      coverImageUrl: seriesData.coverImageUrl ?? undefined,
+      expectedBookCount: seriesData.totalBooks ?? undefined,
+      discoveredBookCount,
+      skipCoverDownload: item.skipCoverDownload,
+      scrapeVersion: SCRAPE_VERSIONS.series,
+      books: booksForSave,
+      pagination: seriesData.pagination
+        ? {
+            currentPage: seriesData.pagination.currentPage,
+            totalPages: seriesData.pagination.totalPages ?? undefined,
+            nextPageUrl: seriesData.pagination.nextPageUrl ?? undefined,
+          }
+        : undefined,
     })
+
+    const booksProcessed = booksForSave.length
+
+    if (isFromQueue) {
+      await markQueueItemComplete({
+        queueId: item._id as Id<'scrapeQueue'>,
+        seriesId,
+      })
+    }
+
+    incrementScrapingCount()
+
+    log('─'.repeat(60))
+    log('')
+
+    return { success: true, seriesId: seriesId as string, booksProcessed }
+  } catch (error) {
+    if (isClosedError(error)) {
+      const recoveredPage = await reconnectPageForRetry({
+        attempt,
+        pageManager,
+        reason: 'Page closed while processing series',
+      })
+
+      if (recoveredPage) {
+        return await processSeriesAttempt({
+          ...params,
+          page: recoveredPage,
+          attempt: attempt + 1,
+        })
+      }
+    }
+
+    throw error
   }
-
-  incrementScrapingCount()
-
-  log('─'.repeat(60))
-  log('')
-
-  return { success: true, seriesId: seriesId as string, booksProcessed }
 }

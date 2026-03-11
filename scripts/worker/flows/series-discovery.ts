@@ -44,7 +44,7 @@ export async function processSeriesDiscoveryFlow(params: {
     startItemLog()
     let success = false
     try {
-      const result = await discoverSeriesUrl({ series, page, dryRun })
+      const result = await discoverSeriesUrl({ series, page, pageManager, dryRun })
       success = result.success
       if (result.success) workDone = true
     } catch (error) {

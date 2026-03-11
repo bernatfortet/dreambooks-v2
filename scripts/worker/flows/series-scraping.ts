@@ -67,7 +67,7 @@ export async function processSeriesScrapingFlow(params: {
     startItemLog()
     let success = false
     try {
-      const result = await processSeriesFromQueue({ item, page, dryRun, seriesId: series._id })
+      const result = await processSeriesFromQueue({ item, page, pageManager, dryRun, seriesId: series._id })
       success = result.success
       if (result.success) workDone = true
     } catch (error) {

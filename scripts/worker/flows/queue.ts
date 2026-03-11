@@ -59,18 +59,18 @@ export async function processQueueFlow(params: { page: Page; pageManager?: PageM
 
     try {
       if (itemType === 'book') {
-        const result = await processBookFromQueue({ item, page, dryRun })
+        const result = await processBookFromQueue({ item, page, pageManager, dryRun })
         success = result.success
         if (result.success) workDone = true
       } else if (itemType === 'series') {
-        const result = await processSeriesFromQueue({ item, page, dryRun })
+        const result = await processSeriesFromQueue({ item, page, pageManager, dryRun })
         success = result.success
         if (result.success) {
           workDone = true
           log(`   📊 Processed ${result.booksProcessed ?? 0} book(s)`)
         }
       } else if (itemType === 'author') {
-        const result = await processAuthorFromQueue({ item, page, dryRun })
+        const result = await processAuthorFromQueue({ item, page, pageManager, dryRun })
         success = result.success
         if (result.success) {
           workDone = true

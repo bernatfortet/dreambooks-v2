@@ -45,7 +45,7 @@ export async function processEnrichmentFlow(params: {
     startItemLog()
     let success = false
     try {
-      success = await enrichBook({ book, page, dryRun })
+      success = await enrichBook({ book, page, pageManager, dryRun })
     } catch (error) {
       logError('   🚨 Enrichment crashed', error)
     } finally {

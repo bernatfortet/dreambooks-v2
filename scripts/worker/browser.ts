@@ -70,7 +70,7 @@ export async function connectToBrowser(): Promise<BrowserConnection> {
 /**
  * Check if an error indicates the browser/page/context was closed.
  */
-function isClosedError(error: unknown): boolean {
+export function isClosedError(error: unknown): boolean {
   if (!(error instanceof Error)) return false
   const message = error.message.toLowerCase()
   return (
@@ -155,6 +155,44 @@ export class PageManager {
     console.log('📑 Created scraping tab')
     return this.page
   }
+}
+
+export async function reconnectPageForRetry(params: {
+  attempt: number
+  pageManager?: PageManager
+  reason: string
+}): Promise<Page | null> {
+  const { attempt, pageManager, reason } = params
+
+  if (!pageManager || attempt >= 2) return null
+
+  console.log(`   🔄 ${reason}, reconnecting and retrying...`)
+  await pageManager.reconnect()
+
+  const page = await pageManager.getPage()
+  return page
+}
+
+export async function recoverPageIfClosed(params: {
+  attempt: number
+  page: Page
+  pageManager?: PageManager
+  reason: string
+}): Promise<Page | null> {
+  const { attempt, page, pageManager, reason } = params
+
+  if (attempt >= 2) return null
+
+  const healthy = await isPageHealthy(page)
+  if (healthy) return null
+
+  const recoveredPage = await reconnectPageForRetry({
+    attempt,
+    pageManager,
+    reason: `Page closed during ${reason}`,
+  })
+
+  return recoveredPage
 }
 
 /**
