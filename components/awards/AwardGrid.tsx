@@ -1,5 +1,6 @@
 'use client'
 
+import type { ReactNode } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { useQuery } from 'convex/react'
@@ -9,20 +10,31 @@ import { api } from '@/convex/_generated/api'
 type AwardListData = NonNullable<FunctionReturnType<typeof api.awards.queries.list>>
 type AwardListItem = AwardListData[number]
 
-export function AwardGrid() {
+type AwardGridProps = {
+  emptyState?: ReactNode
+  excludedAwardId?: AwardListItem['_id']
+}
+
+export function AwardGrid(props: AwardGridProps) {
+  const {
+    emptyState = <p className='py-12 text-center text-muted-foreground'>No awards yet.</p>,
+    excludedAwardId,
+  } = props
   const awards = useQuery(api.awards.queries.list)
 
   if (awards === undefined) {
     return <AwardGridSkeleton />
   }
 
-  if (awards.length === 0) {
-    return <p className='py-12 text-center text-muted-foreground'>No awards yet.</p>
+  const visibleAwards = excludedAwardId ? awards.filter((award) => award._id !== excludedAwardId) : awards
+
+  if (visibleAwards.length === 0) {
+    return emptyState
   }
 
   return (
     <div className='grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3'>
-      {awards.map((award: AwardListItem) => (
+      {visibleAwards.map((award: AwardListItem) => (
         <AwardCard
           key={award._id}
           id={award.slug ?? award._id}

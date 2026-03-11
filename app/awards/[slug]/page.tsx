@@ -6,6 +6,7 @@ import Image from 'next/image'
 import { useQuery } from 'convex/react'
 import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
+import { AwardGrid } from '@/components/awards/AwardGrid'
 import { BookGridList, BookGridSkeleton } from '@/components/books/BookGrid'
 import { DataDebugPanel } from '@/components/ui/DataDebugPanel'
 import { AwardHonorMarker, AwardWinnerMarker } from '@/components/awards/AwardResultMarker'
@@ -76,6 +77,18 @@ export default function AwardPage({ params }: AwardPageProps) {
           ))}
         </div>
       )}
+
+      <section className='mt-16 space-y-6'>
+        <div>
+          <h2 className='text-2xl font-semibold'>More awards</h2>
+          <p className='mt-2 text-muted-foreground'>Browse the rest of the awards collection.</p>
+        </div>
+
+        <AwardGrid
+          excludedAwardId={award._id}
+          emptyState={<p className='py-12 text-center text-muted-foreground'>No other awards yet.</p>}
+        />
+      </section>
 
       <DataDebugPanel data={award} label='Award Data' />
     </PageContainer>
