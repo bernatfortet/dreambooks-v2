@@ -38,6 +38,18 @@ const authorBookValidator = v.object({
   coverHeight: v.union(v.number(), v.null()),
 })
 
+const authorDetailBookValidator = v.object({
+  _id: v.id('books'),
+  slug: v.union(v.string(), v.null()),
+  title: v.string(),
+  authors: v.array(v.string()),
+  coverUrl: v.union(v.string(), v.null()),
+  coverWidth: v.number(),
+  coverHeight: v.number(),
+  dominantColor: v.union(v.string(), v.null()),
+  seriesPosition: v.union(v.number(), v.null()),
+})
+
 const authorListItemValidator = v.object({
   _id: v.id('authors'),
   slug: v.union(v.string(), v.null()),
@@ -156,6 +168,40 @@ function stripAuthorBookCount(author: AuthorWithBookCount) {
     imageUrlLarge: author.imageUrlLarge,
     books: author.books,
   }
+}
+
+async function buildAuthorDetailBooks(
+  context: QueryCtx,
+  authorId: Id<'authors'>,
+) {
+  const bookLinks = await context.db
+    .query('bookAuthors')
+    .withIndex('by_authorId', (q) => q.eq('authorId', authorId))
+    .collect()
+
+  const books = await Promise.all(
+    bookLinks.map(async (link) => {
+      const book = (await context.db.get(link.bookId)) as Doc<'books'> | null
+      if (!book) return null
+      if (!isBookVisibleForDiscovery(book)) return null
+
+      const { coverUrl } = await resolveBookCoverUrls(context.storage, book)
+
+      return {
+        _id: book._id,
+        slug: book.slug ?? null,
+        title: book.title,
+        authors: book.authors,
+        coverUrl,
+        coverWidth: book.cover?.width ?? 200,
+        coverHeight: book.cover?.height ?? 300,
+        dominantColor: book.cover?.dominantColor ?? null,
+        seriesPosition: book.seriesPosition ?? null,
+      }
+    }),
+  )
+
+  return books.filter((book): book is NonNullable<typeof book> => book !== null)
 }
 
 /**
@@ -442,15 +488,7 @@ export const getBySlugOrId = query({
       badScrape: v.union(v.boolean(), v.null()),
       badScrapeNotes: v.union(v.string(), v.null()),
       bookCount: v.number(),
-      books: v.array(
-        v.object({
-          _id: v.id('books'),
-          slug: v.union(v.string(), v.null()),
-          title: v.string(),
-          coverUrl: v.union(v.string(), v.null()),
-          seriesPosition: v.union(v.number(), v.null()),
-        }),
-      ),
+      books: v.array(authorDetailBookValidator),
     }),
   ),
   handler: async (context, args) => {
@@ -461,25 +499,8 @@ export const getBySlugOrId = query({
       .first()
     if (bySlug) {
       const { imageUrl, imageUrlThumb, imageUrlLarge } = await resolveImageUrls(context.storage, bySlug)
-      const bookLinks = await context.db
-        .query('bookAuthors')
-        .withIndex('by_authorId', (q) => q.eq('authorId', bySlug._id))
-        .collect()
-      const books = await Promise.all(
-        bookLinks.map(async (link) => {
-          const book = (await context.db.get(link.bookId)) as Doc<'books'> | null
-          if (!book) return null
-          if (!isBookVisibleForDiscovery(book)) return null
-          const { coverUrl } = await resolveBookCoverUrls(context.storage, book)
-          return {
-            _id: book._id,
-            slug: book.slug ?? null,
-            title: book.title,
-            coverUrl,
-            seriesPosition: book.seriesPosition ?? null,
-          }
-        }),
-      )
+      const books = await buildAuthorDetailBooks(context, bySlug._id)
+
       return {
         _id: bySlug._id,
         name: bySlug.name,
@@ -492,8 +513,8 @@ export const getBySlugOrId = query({
         scrapeStatus: bySlug.scrapeStatus,
         badScrape: bySlug.badScrape ?? null,
         badScrapeNotes: bySlug.badScrapeNotes ?? null,
-        bookCount: books.filter((b): b is NonNullable<typeof b> => b !== null).length,
-        books: books.filter((b): b is NonNullable<typeof b> => b !== null),
+        bookCount: books.length,
+        books,
       }
     }
 
@@ -502,25 +523,8 @@ export const getBySlugOrId = query({
       const byId = (await context.db.get(args.slugOrId as Id<'authors'>)) as Doc<'authors'> | null
       if (byId) {
         const { imageUrl, imageUrlThumb, imageUrlLarge } = await resolveImageUrls(context.storage, byId)
-        const bookLinks = await context.db
-          .query('bookAuthors')
-          .withIndex('by_authorId', (q) => q.eq('authorId', byId._id))
-          .collect()
-        const books = await Promise.all(
-          bookLinks.map(async (link) => {
-            const book = (await context.db.get(link.bookId)) as Doc<'books'> | null
-            if (!book) return null
-            if (!isBookVisibleForDiscovery(book)) return null
-            const { coverUrl } = await resolveBookCoverUrls(context.storage, book)
-            return {
-              _id: book._id,
-              slug: book.slug ?? null,
-              title: book.title,
-              coverUrl,
-              seriesPosition: book.seriesPosition ?? null,
-            }
-          }),
-        )
+        const books = await buildAuthorDetailBooks(context, byId._id)
+
         return {
           _id: byId._id,
           name: byId.name,
@@ -533,8 +537,8 @@ export const getBySlugOrId = query({
           scrapeStatus: byId.scrapeStatus,
           badScrape: byId.badScrape ?? null,
           badScrapeNotes: byId.badScrapeNotes ?? null,
-          bookCount: books.filter((b): b is NonNullable<typeof b> => b !== null).length,
-          books: books.filter((b): b is NonNullable<typeof b> => b !== null),
+          bookCount: books.length,
+          books,
         }
       }
     } catch {
