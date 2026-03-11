@@ -32,7 +32,7 @@ export const SCRAPE_VERSIONS = {
   /** Version of the series scraping/parsing logic */
   series: 2, // v2: store canonical sourceUrl on re-scrape
   /** Version of the author scraping/parsing logic */
-  author: 1,
+  author: 2, // v2: enrich authors with Instagram handles discovered from Google
 } as const
 
 export type ScrapeVersions = typeof SCRAPE_VERSIONS

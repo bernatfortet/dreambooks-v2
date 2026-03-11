@@ -1,6 +1,7 @@
 import type { Page } from 'playwright'
 import { parseAuthorFromPage } from '@/lib/scraping/domains/author/parse'
 import { discoverAuthorLinks } from '@/lib/scraping/domains/author/discover'
+import { discoverAuthorInstagram } from '@/lib/scraping/domains/author/instagram'
 import { type PageManager, isClosedError, navigateWithRetry, reconnectPageForRetry, recoverPageIfClosed } from '../browser'
 import { truncate, incrementScrapingCount, log } from '../utils'
 import { getConvexClient, markQueueItemComplete, markQueueItemError, queueDiscoveries, type QueueItem, type Id } from '../convex'
@@ -129,6 +130,22 @@ async function processAuthorAttempt(params: {
     log(`   Series found: ${authorData.series.length}`)
     log(`   Books found: ${authorData.books.length}`)
 
+    const instagramMatch = await discoverAuthorInstagram({
+      page,
+      authorName: authorData.name,
+      books: authorData.books,
+    })
+
+    if (instagramMatch) {
+      authorData.instagramHandle = instagramMatch.instagramHandle
+      authorData.instagramUrl = instagramMatch.instagramUrl
+
+      log(`   Instagram: @${instagramMatch.instagramHandle} (score: ${instagramMatch.score})`)
+      log(`   Instagram query: ${instagramMatch.query}`)
+    } else {
+      log('   Instagram: none found')
+    }
+
     if (dryRun) {
       log(`   🏁 Would import (dry run)`)
       return { success: true }
@@ -162,6 +179,8 @@ async function processAuthorAttempt(params: {
           amazonAuthorId: authorData.amazonAuthorId,
           sourceUrl: item.url,
           imageUrl: authorData.imageUrl ?? undefined,
+          instagramHandle: authorData.instagramHandle ?? undefined,
+          instagramUrl: authorData.instagramUrl ?? undefined,
         },
         apiKey,
         firstSeenFromUrl: item.referrerUrl,

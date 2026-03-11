@@ -9,5 +9,5 @@
 export const SCRAPE_VERSIONS = {
   book: 1,
   series: 2, // v2: store canonical sourceUrl on re-scrape
-  author: 1,
+  author: 2, // v2: enrich authors with Instagram handles discovered from Google
 } as const

@@ -529,6 +529,8 @@ export default defineSchema({
     source: v.string(), // 'amazon'
     amazonAuthorId: v.string(), // e.g., 'B000APEZHY' - required, unique
     sourceUrl: v.optional(v.string()),
+    instagramHandle: v.optional(v.string()),
+    instagramUrl: v.optional(v.string()),
 
     // Image
     image: v.optional(

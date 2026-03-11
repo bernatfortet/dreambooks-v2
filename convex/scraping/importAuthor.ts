@@ -15,6 +15,8 @@ const scrapedAuthorDataValidator = v.object({
   amazonAuthorId: v.string(),
   sourceUrl: v.optional(v.string()),
   imageUrl: v.optional(v.string()),
+  instagramHandle: v.optional(v.string()),
+  instagramUrl: v.optional(v.string()),
 })
 
 const localScrapeSourceValidator = v.union(
@@ -65,6 +67,8 @@ export const importFromLocalScrape = action({
       amazonAuthorId: args.authorData.amazonAuthorId,
       sourceUrl: args.authorData.sourceUrl,
       sourceImageUrl: args.authorData.imageUrl,
+      instagramHandle: args.authorData.instagramHandle,
+      instagramUrl: args.authorData.instagramUrl,
       scrapeVersion: SCRAPE_VERSIONS.author,
       firstSeenFromUrl: args.firstSeenFromUrl,
       firstSeenReason: args.firstSeenReason,

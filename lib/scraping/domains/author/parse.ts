@@ -25,6 +25,8 @@ export async function parseAuthorFromPage(page: Page): Promise<AuthorData> {
     bio,
     imageUrl,
     amazonAuthorId,
+    instagramHandle: null,
+    instagramUrl: null,
     series,
     books,
   }

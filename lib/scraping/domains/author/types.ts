@@ -3,6 +3,8 @@ export type AuthorData = {
   bio: string | null
   imageUrl: string | null
   amazonAuthorId: string | null
+  instagramHandle: string | null
+  instagramUrl: string | null
   series: AuthorSeriesEntry[]
   books: AuthorBookEntry[]
 }

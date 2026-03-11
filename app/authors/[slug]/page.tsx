@@ -44,7 +44,13 @@ export default function AuthorPage({ params }: AuthorPageProps) {
         <AuthorImage imageUrl={author.imageUrlLarge ?? author.imageUrl} name={author.name} />
 
         <div className='flex-1'>
-          <AuthorHeader name={author.name} bio={author.bio} bookCount={author.bookCount} />
+          <AuthorHeader
+            name={author.name}
+            bio={author.bio}
+            bookCount={author.bookCount}
+            instagramHandle={author.instagramHandle}
+            instagramUrl={author.instagramUrl}
+          />
         </div>
       </div>
 
@@ -87,11 +93,31 @@ function AuthorImage({ imageUrl, name }: { imageUrl: string | null; name: string
   )
 }
 
-function AuthorHeader({ name, bio, bookCount }: { name: string; bio: string | null; bookCount: number }) {
+function AuthorHeader(params: {
+  name: string
+  bio: string | null
+  bookCount: number
+  instagramHandle: string | null
+  instagramUrl: string | null
+}) {
+  const { name, bio, bookCount, instagramHandle, instagramUrl } = params
+
   return (
     <div>
       <h1 className='text-3xl font-bold'>{name}</h1>
       {bio && <p className='text-muted-foreground mt-2 leading-relaxed'>{bio}</p>}
+      {instagramHandle && instagramUrl ? (
+        <p className='mt-3 text-sm'>
+          <a
+            href={instagramUrl}
+            target='_blank'
+            rel='noreferrer'
+            className='text-muted-foreground hover:text-foreground hover:underline'
+          >
+            Instagram: @{instagramHandle}
+          </a>
+        </p>
+      ) : null}
       <p className='text-sm text-muted-foreground mt-2'>
         {bookCount} {bookCount === 1 ? 'book' : 'books'}
       </p>

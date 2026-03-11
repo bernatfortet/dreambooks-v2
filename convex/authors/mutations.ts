@@ -1,9 +1,19 @@
-import { internalMutation, mutation } from '../_generated/server'
+import { internalMutation, mutation, MutationCtx } from '../_generated/server'
 import { v } from 'convex/values'
 import type { Doc, Id } from '../_generated/dataModel'
 import { generateUniqueSlug } from '../lib/slug'
 import { deleteScrapeArtifacts, clearScrapeQueueReferences, deleteStorageFile } from '../lib/deleteHelpers'
+import { requireScrapeImportKey } from '../lib/scrapeImportAuth'
 import { requireSuperadmin } from '../lib/superadmin'
+
+async function requireAuthorAdminAccess(context: MutationCtx, apiKey: string | undefined) {
+  if (apiKey) {
+    requireScrapeImportKey(apiKey)
+    return
+  }
+
+  await requireSuperadmin(context)
+}
 
 /**
  * Upsert an author from scrape data.
@@ -16,6 +26,8 @@ export const upsertFromScrape = internalMutation({
     amazonAuthorId: v.string(),
     sourceUrl: v.optional(v.string()),
     sourceImageUrl: v.optional(v.string()),
+    instagramHandle: v.optional(v.string()),
+    instagramUrl: v.optional(v.string()),
     scrapeVersion: v.optional(v.number()),
     firstSeenFromUrl: v.optional(v.string()),
     firstSeenReason: v.optional(v.string()),
@@ -35,6 +47,8 @@ export const upsertFromScrape = internalMutation({
         name: args.name,
         bio: args.bio ?? existing.bio,
         sourceUrl: args.sourceUrl ?? existing.sourceUrl,
+        ...(args.instagramHandle ? { instagramHandle: args.instagramHandle } : {}),
+        ...(args.instagramUrl ? { instagramUrl: args.instagramUrl } : {}),
         ...(args.scrapeVersion !== undefined ? { scrapeVersion: args.scrapeVersion } : {}),
         // Only set firstSeenFromUrl/firstSeenReason if author doesn't already have them (preserve original provenance)
         ...(args.firstSeenFromUrl !== undefined && !existing.firstSeenFromUrl ? { firstSeenFromUrl: args.firstSeenFromUrl } : {}),
@@ -69,6 +83,8 @@ export const upsertFromScrape = internalMutation({
       source: 'amazon',
       amazonAuthorId: args.amazonAuthorId,
       sourceUrl: args.sourceUrl,
+      instagramHandle: args.instagramHandle,
+      instagramUrl: args.instagramUrl,
       ...(args.sourceImageUrl ? { image: { sourceImageUrl: args.sourceImageUrl } } : {}),
       scrapeVersion: args.scrapeVersion,
       firstSeenFromUrl: args.firstSeenFromUrl,
@@ -162,6 +178,34 @@ export const clearImageData = mutation({
 
     await context.db.patch(args.authorId, {
       image: undefined,
+    })
+
+    return null
+  },
+})
+
+export const clearInstagramData = mutation({
+  args: {
+    authorId: v.id('authors'),
+    apiKey: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (context, args) => {
+    await requireAuthorAdminAccess(context, args.apiKey)
+
+    const author = await context.db.get(args.authorId)
+    if (!author) {
+      throw new Error('Author not found')
+    }
+
+    await context.db.patch(args.authorId, {
+      instagramHandle: undefined,
+      instagramUrl: undefined,
+    })
+
+    console.log('🧹 Cleared author Instagram data', {
+      authorId: args.authorId,
+      name: author.name,
     })
 
     return null
