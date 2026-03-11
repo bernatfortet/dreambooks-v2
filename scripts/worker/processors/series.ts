@@ -11,12 +11,11 @@ import {
   markQueueItemError,
   queueDiscoveries,
   saveSeriesFromScrape,
+  upsertSeriesFromUrl,
   type QueueItem,
   type Id,
 } from '../convex'
 import { api } from '@/convex/_generated/api'
-
-const SCRAPE_IMPORT_KEY = process.env.SCRAPE_IMPORT_KEY
 
 type ProcessSeriesResult = {
   success: boolean
@@ -178,8 +177,7 @@ async function processSeriesAttempt(
 
       seriesId =
         existingSeriesId ??
-        (await client.mutation(api.series.mutations.upsertFromUrl, {
-          apiKey: SCRAPE_IMPORT_KEY,
+        (await upsertSeriesFromUrl({
           name: seriesData.name,
           sourceUrl: item.url,
           description: seriesData.description ?? undefined,

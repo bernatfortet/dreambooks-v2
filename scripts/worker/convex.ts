@@ -1,6 +1,9 @@
 import { ConvexHttpClient } from 'convex/browser'
+import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
 import type { Id } from '@/convex/_generated/dataModel'
+
+const workerApi = api.worker
 
 let clientInstance: ConvexHttpClient | null = null
 
@@ -21,58 +24,30 @@ export function getConvexClient(): ConvexHttpClient {
 
 // --- Queue operations ---
 
-export type QueueItem = {
-  _id: Id<'scrapeQueue'>
-  url: string
-  type: 'book' | 'series' | 'author'
-  scrapeFullSeries: boolean
-  priority: number
-  source: 'user' | 'discovery'
-  referrerUrl?: string
-  referrerReason?: string
-  createdAt: number
-  // Re-scrape skip options
-  skipSeriesLink?: boolean
-  skipAuthorDiscovery?: boolean
-  skipBookDiscoveries?: boolean
-  skipCoverDownload?: boolean
-  bookId?: Id<'books'>
-}
+type PendingQueueItems = NonNullable<FunctionReturnType<typeof workerApi.listPendingQueueItems>>
+type SeriesNeedingScrapeList = NonNullable<FunctionReturnType<typeof api.series.queries.listNeedingScrape>>
+type SeriesNeedingUrlDiscoveryList = NonNullable<FunctionReturnType<typeof api.series.queries.listNeedingUrlDiscovery>>
+
+export type QueueItem = PendingQueueItems[number]
 
 export async function fetchPendingQueueItems(limit: number = 5): Promise<QueueItem[]> {
-  const client = getConvexClient()
-  const items = await client.query(api.scrapeQueue.queries.listPending, {
-    apiKey: getScrapeImportKey(),
+  const { client, apiKey } = getWorkerContext()
+  const items = await client.query(workerApi.listPendingQueueItems, {
+    apiKey,
     limit,
   })
   return items as QueueItem[]
 }
 
-export type BookIntakeItem = {
-  _id: Id<'bookIntake'>
-  title: string
-  authorName: string | null
-  illustratorName: string | null
-  searchQuery: string
-  sourceType: 'manual' | 'award' | 'list'
-  sourceLabel: string | null
-  sourcePath: string | null
-  sourcePage: number | null
-  rawText: string | null
-  sourceMetadataJson: string | null
-  linkedAwardName: string | null
-  linkedAwardYear: number | null
-  linkedAwardCategory: string | null
-  linkedAwardResultType: 'winner' | 'honor' | 'finalist' | 'other' | null
-}
+export type BookIntakeItem = NonNullable<FunctionReturnType<typeof api.bookIntake.worker.claimNextPending>>
 
 export async function claimNextBookIntake(workerId: string): Promise<BookIntakeItem | null> {
-  const client = getConvexClient()
+  const { client, apiKey } = getWorkerContext()
   const item = await client.action(api.bookIntake.worker.claimNextPending, {
-    apiKey: getScrapeImportKey(),
+    apiKey,
     workerId,
   })
-  return item as BookIntakeItem | null
+  return item
 }
 
 export async function markBookIntakeNeedsReview(params: {
@@ -82,17 +57,17 @@ export async function markBookIntakeNeedsReview(params: {
   matchedAsin?: string
   matchedAmazonUrl?: string
 }): Promise<void> {
-  const client = getConvexClient()
+  const { client, apiKey } = getWorkerContext()
   await client.action(api.bookIntake.worker.markNeedsReview, {
-    apiKey: getScrapeImportKey(),
+    apiKey,
     ...params,
   })
 }
 
 export async function markBookIntakeFailed(intakeId: Id<'bookIntake'>, errorMessage: string): Promise<void> {
-  const client = getConvexClient()
+  const { client, apiKey } = getWorkerContext()
   await client.action(api.bookIntake.worker.markFailed, {
-    apiKey: getScrapeImportKey(),
+    apiKey,
     intakeId,
     errorMessage,
   })
@@ -102,9 +77,9 @@ export async function markBookIntakeResolvedExisting(params: {
   intakeId: Id<'bookIntake'>
   bookId: Id<'books'>
 }): Promise<void> {
-  const client = getConvexClient()
+  const { client, apiKey } = getWorkerContext()
   await client.action(api.bookIntake.worker.markResolvedExisting, {
-    apiKey: getScrapeImportKey(),
+    apiKey,
     ...params,
   })
 }
@@ -113,9 +88,9 @@ export async function markBookIntakeReadyToScrape(params: {
   intakeId: Id<'bookIntake'>
   amazonUrl: string
 }): Promise<void> {
-  const client = getConvexClient()
+  const { client, apiKey } = getWorkerContext()
   await client.action(api.bookIntake.worker.markReadyToScrape, {
-    apiKey: getScrapeImportKey(),
+    apiKey,
     ...params,
   })
 }
@@ -124,9 +99,9 @@ export async function markBookIntakeReadyToScrape(params: {
  * @deprecated Use claimQueueItem instead for safe concurrent processing.
  */
 export async function markQueueItemProcessing(queueId: Id<'scrapeQueue'>): Promise<void> {
-  const client = getConvexClient()
+  const { client, apiKey } = getWorkerContext()
   await client.mutation(api.scrapeQueue.mutations.markProcessing, {
-    apiKey: getScrapeImportKey(),
+    apiKey,
     queueId,
   })
 }
@@ -136,9 +111,9 @@ export async function markQueueItemProcessing(queueId: Id<'scrapeQueue'>): Promi
  * Returns { success: true } if claimed, { success: false, reason } if not available.
  */
 export async function claimQueueItem(queueId: Id<'scrapeQueue'>, workerId: string): Promise<{ success: boolean; reason?: string }> {
-  const client = getConvexClient()
+  const { client, apiKey } = getWorkerContext()
   return await client.mutation(api.scrapeQueue.mutations.claimItem, {
-    apiKey: getScrapeImportKey(),
+    apiKey,
     queueId,
     workerId,
   })
@@ -150,17 +125,17 @@ export async function markQueueItemComplete(params: {
   seriesId?: Id<'series'>
   authorId?: Id<'authors'>
 }): Promise<void> {
-  const client = getConvexClient()
+  const { client, apiKey } = getWorkerContext()
   await client.mutation(api.scrapeQueue.mutations.markComplete, {
-    apiKey: getScrapeImportKey(),
+    apiKey,
     ...params,
   })
 }
 
 export async function markQueueItemError(queueId: Id<'scrapeQueue'>, errorMessage: string): Promise<void> {
-  const client = getConvexClient()
+  const { client, apiKey } = getWorkerContext()
   await client.mutation(api.scrapeQueue.mutations.markError, {
-    apiKey: getScrapeImportKey(),
+    apiKey,
     queueId,
     errorMessage,
   })
@@ -170,9 +145,9 @@ export async function queueDiscoveries(
   discoveries: Array<{ type: 'book' | 'series' | 'author'; url: string; priority: number; source: string }>,
   referrerUrl?: string,
 ): Promise<number> {
-  const client = getConvexClient()
+  const { client, apiKey } = getWorkerContext()
   return await client.mutation(api.scrapeQueue.mutations.enqueueDiscoveries, {
-    apiKey: getScrapeImportKey(),
+    apiKey,
     discoveries,
     referrerUrl,
   })
@@ -191,23 +166,23 @@ export async function requeueAsType(params: {
   referrerUrl?: string
   referrerReason?: string
 }): Promise<void> {
-  const client = getConvexClient()
+  const { client, apiKey } = getWorkerContext()
 
   // Get the original item to preserve provenance
-  const original = await client.query(api.scrapeQueue.queries.get, {
-    apiKey: getScrapeImportKey(),
+  const original = await client.query(workerApi.getQueueItem, {
+    apiKey,
     queueId: params.currentQueueId,
   })
 
   // Remove the current item
   await client.mutation(api.scrapeQueue.mutations.remove, {
-    apiKey: getScrapeImportKey(),
+    apiKey,
     queueId: params.currentQueueId,
   })
 
   // Enqueue with the correct type, preserving provenance
   await client.mutation(api.scrapeQueue.mutations.enqueue, {
-    apiKey: getScrapeImportKey(),
+    apiKey,
     url: params.url,
     type: params.newType,
     priority: params.priority ?? 20, // Higher priority since we detected the correct type
@@ -264,13 +239,7 @@ export async function markBookEnrichmentError(bookId: Id<'books'>, errorMessage:
 
 // --- Series operations ---
 
-export type SeriesToScrape = {
-  _id: Id<'series'>
-  name: string
-  sourceUrl?: string
-  nextPageUrl?: string
-  scrapeStatus: string
-}
+export type SeriesToScrape = SeriesNeedingScrapeList[number]
 
 export async function fetchSeriesNeedingScrape(limit: number = 3): Promise<SeriesToScrape[]> {
   const client = getConvexClient()
@@ -278,11 +247,7 @@ export async function fetchSeriesNeedingScrape(limit: number = 3): Promise<Serie
   return series as SeriesToScrape[]
 }
 
-export type SeriesNeedingUrl = {
-  _id: Id<'series'>
-  name: string
-  bookAmazonUrl: string
-}
+export type SeriesNeedingUrl = SeriesNeedingUrlDiscoveryList[number]
 
 export async function fetchSeriesNeedingUrlDiscovery(limit: number = 3): Promise<SeriesNeedingUrl[]> {
   const client = getConvexClient()
@@ -291,9 +256,9 @@ export async function fetchSeriesNeedingUrlDiscovery(limit: number = 3): Promise
 }
 
 export async function updateSeriesSourceUrl(seriesId: Id<'series'>, sourceUrl: string): Promise<void> {
-  const client = getConvexClient()
-  await client.mutation(api.series.mutations.updateSourceUrl, {
-    apiKey: getScrapeImportKey(),
+  const { client, apiKey } = getWorkerContext()
+  await client.mutation(workerApi.updateSeriesSourceUrl, {
+    apiKey,
     seriesId,
     sourceUrl,
   })
@@ -325,10 +290,27 @@ export async function saveSeriesFromScrape(
     }
   },
 ): Promise<void> {
-  const client = getConvexClient()
-  await client.mutation(api.series.mutations.saveFromCliScrape, {
-    apiKey: getScrapeImportKey(),
+  const { client, apiKey } = getWorkerContext()
+  await client.mutation(workerApi.saveSeriesFromScrape, {
+    apiKey,
     seriesId,
+    ...data,
+  })
+}
+
+export async function upsertSeriesFromUrl(data: {
+  name: string
+  sourceUrl: string
+  description?: string
+  coverImageUrl?: string
+  skipCoverDownload?: boolean
+  firstSeenFromUrl?: string
+  firstSeenReason?: string
+}): Promise<Id<'series'>> {
+  const { client, apiKey } = getWorkerContext()
+
+  return await client.mutation(workerApi.upsertSeriesFromUrl, {
+    apiKey,
     ...data,
   })
 }
@@ -383,9 +365,9 @@ export async function queueEntityForRescrape(
   entityType: 'book' | 'series' | 'author',
   entityId: Id<'books'> | Id<'series'> | Id<'authors'>,
 ): Promise<Id<'scrapeQueue'>> {
-  const client = getConvexClient()
+  const { client, apiKey } = getWorkerContext()
   return await client.mutation(api.scrapeQueue.mutations.queueRescrape, {
-    apiKey: getScrapeImportKey(),
+    apiKey,
     entityType,
     entityId,
   })
@@ -393,24 +375,29 @@ export async function queueEntityForRescrape(
 
 // --- Stats operations ---
 
-export type EntityStats = {
-  books: number
-  series: number
-  authors: number
-}
+export type EntityStats = FunctionReturnType<typeof workerApi.stats>
 
 export async function fetchEntityStats(): Promise<EntityStats> {
-  const client = getConvexClient()
-  return await client.query(api.admin.queries.stats, {})
+  const { client, apiKey } = getWorkerContext()
+  return await client.query(workerApi.stats, {
+    apiKey,
+  })
 }
 
-function getScrapeImportKey() {
+export function getScrapeImportKey() {
   const apiKey = process.env.SCRAPE_IMPORT_KEY
   if (!apiKey) {
     throw new Error('SCRAPE_IMPORT_KEY environment variable is not set')
   }
 
   return apiKey
+}
+
+function getWorkerContext() {
+  return {
+    client: getConvexClient(),
+    apiKey: getScrapeImportKey(),
+  }
 }
 
 // Re-export types

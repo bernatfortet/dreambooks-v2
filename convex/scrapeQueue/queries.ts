@@ -1,6 +1,7 @@
 import { query } from '../_generated/server'
 import type { QueryCtx } from '../_generated/server'
 import { v } from 'convex/values'
+import { readSystemStatsWithFallback } from '../lib/systemStats'
 import { requireScrapeImportKey } from '../lib/scrapeImportAuth'
 import { requireSuperadmin } from '../lib/superadmin'
 
@@ -75,10 +76,11 @@ export const listPending = query({
  */
 export const list = query({
   args: {
+    apiKey: v.optional(v.string()),
     limit: v.optional(v.number()),
   },
   handler: async (context, args) => {
-    await requireSuperadmin(context)
+    await requireQueueReadAccess(context, args.apiKey)
 
     const limit = args.limit ?? 50
 
@@ -109,14 +111,6 @@ export const get = query({
 export const stats = query({
   handler: async (context) => {
     await requireSuperadmin(context)
-
-    const all = await context.db.query('scrapeQueue').collect()
-
-    const pending = all.filter((i) => i.status === 'pending').length
-    const processing = all.filter((i) => i.status === 'processing').length
-    const complete = all.filter((i) => i.status === 'complete').length
-    const error = all.filter((i) => i.status === 'error').length
-
-    return { pending, processing, complete, error, total: all.length }
+    return (await readSystemStatsWithFallback(context.db)).scrapeQueue
   },
 })

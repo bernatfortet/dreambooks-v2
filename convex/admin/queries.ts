@@ -1,28 +1,40 @@
 import { query } from '../_generated/server'
+import type { QueryCtx } from '../_generated/server'
 import { v } from 'convex/values'
 import { isBookVisibleForDiscovery } from '../lib/bookVisibility'
+import { readSystemStatsWithFallback } from '../lib/systemStats'
+import { requireScrapeImportKey } from '../lib/scrapeImportAuth'
 import { requireSuperadmin } from '../lib/superadmin'
+
+async function requireAdminReadAccess(context: QueryCtx, apiKey: string | undefined) {
+  if (apiKey) {
+    requireScrapeImportKey(apiKey)
+    return
+  }
+
+  await requireSuperadmin(context)
+}
 
 /**
  * Get database statistics for admin dashboard.
  */
 export const stats = query({
+  args: {
+    apiKey: v.optional(v.string()),
+  },
   returns: v.object({
     books: v.number(),
     series: v.number(),
     authors: v.number(),
   }),
-  handler: async (context) => {
-    await requireSuperadmin(context)
-
-    const books = await context.db.query('books').collect()
-    const series = await context.db.query('series').collect()
-    const authors = await context.db.query('authors').collect()
+  handler: async (context, args) => {
+    await requireAdminReadAccess(context, args.apiKey)
+    const stats = await readSystemStatsWithFallback(context.db)
 
     return {
-      books: books.length,
-      series: series.length,
-      authors: authors.length,
+      books: stats.entityCounts.books,
+      series: stats.entityCounts.series,
+      authors: stats.entityCounts.authors,
     }
   },
 })
