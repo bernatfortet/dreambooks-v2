@@ -3,9 +3,11 @@
 import { usePaginatedQuery } from 'convex/react'
 import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
+import { AuthorProfileActions } from '@/components/authors/AuthorProfileActions'
 import { PaginatedCollectionSection } from '@/components/collections/PaginatedCollectionSection'
 import Image from 'next/image'
 import Link from 'next/link'
+import type { Id } from '@/convex/_generated/dataModel'
 
 const DEFAULT_BOOK_COVER_ASPECT_RATIO = 2 / 3
 const AUTHORS_PAGE_SIZE = 10
@@ -35,6 +37,7 @@ export function AuthorList() {
 }
 
 type AuthorItemProps = {
+  authorId: Id<'authors'>
   slug: string
   name: string
   imageUrl: string | null
@@ -48,15 +51,19 @@ type AuthorItemProps = {
   }>
 }
 
-function AuthorItem({ slug, name, imageUrl, books }: AuthorItemProps) {
+function AuthorItem({ authorId, slug, name, imageUrl, books }: AuthorItemProps) {
   return (
     <div className='space-y-4 sm:flex sm:items-start sm:gap-6 sm:space-y-0'>
-      <div className='flex items-center gap-4 sm:w-56 sm:shrink-0'>
-        <AuthorAvatar imageUrl={imageUrl} name={name} />
+      <div className='flex items-start justify-between gap-3 sm:w-56 sm:shrink-0'>
+        <div className='flex items-center gap-4 min-w-0'>
+          <AuthorAvatar imageUrl={imageUrl} name={name} />
 
-        <Link href={getAuthorPath(slug)}>
-          <h2 className='text-xl font-semibold transition-colors hover:text-primary'>{name}</h2>
-        </Link>
+          <Link href={getAuthorPath(slug)} className='min-w-0'>
+            <h2 className='text-xl font-semibold transition-colors hover:text-primary'>{name}</h2>
+          </Link>
+        </div>
+
+        <AuthorProfileActions authorId={authorId} layout='inline' />
       </div>
 
       {books.length === 0 ? (
@@ -156,7 +163,14 @@ function renderAuthorItems(authors: AuthorListItem[]) {
   return (
     <div className='space-y-8'>
       {authors.map((author) => (
-        <AuthorItem key={author._id} slug={author.slug ?? author._id} name={author.name} imageUrl={author.imageUrl} books={author.books} />
+        <AuthorItem
+          key={author._id}
+          authorId={author._id}
+          slug={author.slug ?? author._id}
+          name={author.name}
+          imageUrl={author.imageUrl}
+          books={author.books}
+        />
       ))}
     </div>
   )

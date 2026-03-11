@@ -47,6 +47,8 @@ const authorDetailBookValidator = v.object({
   coverWidth: v.number(),
   coverHeight: v.number(),
   dominantColor: v.union(v.string(), v.null()),
+  seriesId: v.union(v.id('series'), v.null()),
+  seriesName: v.union(v.string(), v.null()),
   seriesPosition: v.union(v.number(), v.null()),
 })
 
@@ -78,10 +80,7 @@ type AuthorWithBookCount = {
   bookCount: number
 }
 
-async function buildAuthorWithTopBooks(
-  context: QueryCtx,
-  author: Doc<'authors'>,
-): Promise<AuthorWithBookCount> {
+async function buildAuthorWithTopBooks(context: QueryCtx, author: Doc<'authors'>): Promise<AuthorWithBookCount> {
   const { imageUrl, imageUrlThumb, imageUrlLarge } = await resolveImageUrls(context.storage, author)
 
   const bookLinks = await context.db
@@ -122,9 +121,7 @@ async function buildAuthorWithTopBooks(
   }
 }
 
-async function buildAuthorsWithTopBooks(
-  context: QueryCtx,
-): Promise<AuthorWithBookCount[]> {
+async function buildAuthorsWithTopBooks(context: QueryCtx): Promise<AuthorWithBookCount[]> {
   const allAuthors = await context.db.query('authors').order('desc').collect()
   const authorsWithBooks = await Promise.all(allAuthors.map((author) => buildAuthorWithTopBooks(context, author)))
 
@@ -133,10 +130,7 @@ async function buildAuthorsWithTopBooks(
   return authorsWithBooks
 }
 
-function paginateAuthorsPage(
-  authors: AuthorWithBookCount[],
-  paginationOpts: { cursor: string | null; numItems: number },
-) {
+function paginateAuthorsPage(authors: AuthorWithBookCount[], paginationOpts: { cursor: string | null; numItems: number }) {
   let startIndex = 0
 
   if (paginationOpts.cursor) {
@@ -170,10 +164,7 @@ function stripAuthorBookCount(author: AuthorWithBookCount) {
   }
 }
 
-async function buildAuthorDetailBooks(
-  context: QueryCtx,
-  authorId: Id<'authors'>,
-) {
+async function buildAuthorDetailBooks(context: QueryCtx, authorId: Id<'authors'>) {
   const bookLinks = await context.db
     .query('bookAuthors')
     .withIndex('by_authorId', (q) => q.eq('authorId', authorId))
@@ -196,6 +187,8 @@ async function buildAuthorDetailBooks(
         coverWidth: book.cover?.width ?? 200,
         coverHeight: book.cover?.height ?? 300,
         dominantColor: book.cover?.dominantColor ?? null,
+        seriesId: book.seriesId ?? null,
+        seriesName: book.seriesName ?? null,
         seriesPosition: book.seriesPosition ?? null,
       }
     }),

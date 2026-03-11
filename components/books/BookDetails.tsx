@@ -2,6 +2,7 @@ import Link from 'next/link'
 import type React from 'react'
 import { Building2, Calendar, FileText, BookOpen, GraduationCap, Youtube, BabyIcon } from 'lucide-react'
 import { AmazonIcon } from '@/components/icons/amazon-icon'
+import { BookProfileActions } from '@/components/books/BookProfileActions'
 import { Button } from '@/components/ui/button'
 import { ExpandableDescription } from '@/components/books/ExpandableDescription'
 import { toSlug } from '@/lib/scraping/utils/slug'
@@ -215,6 +216,7 @@ export function BookDetails({ book }: BookDetailsProps) {
   return (
     <div className='flex-1 space-y-4'>
       <BookHeading book={book} />
+      <BookProfileActions bookId={book._id} />
       <BookMetaDetails book={book} />
       <BookLinks book={book} />
     </div>

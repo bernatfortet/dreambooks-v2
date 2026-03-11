@@ -1,9 +1,6 @@
-'use client'
-
 import type { ReactNode } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
-import { useQuery } from 'convex/react'
 import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
 
@@ -11,20 +8,17 @@ type AwardListData = NonNullable<FunctionReturnType<typeof api.awards.queries.li
 type AwardListItem = AwardListData[number]
 
 type AwardGridProps = {
+  awards: AwardListData
   emptyState?: ReactNode
   excludedAwardId?: AwardListItem['_id']
 }
 
 export function AwardGrid(props: AwardGridProps) {
   const {
+    awards,
     emptyState = <p className='py-12 text-center text-muted-foreground'>No awards yet.</p>,
     excludedAwardId,
   } = props
-  const awards = useQuery(api.awards.queries.list)
-
-  if (awards === undefined) {
-    return <AwardGridSkeleton />
-  }
 
   const visibleAwards = excludedAwardId ? awards.filter((award) => award._id !== excludedAwardId) : awards
 

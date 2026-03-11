@@ -1,11 +1,8 @@
-'use client'
-
-import { use } from 'react'
+import { fetchQuery } from 'convex/nextjs'
 import Link from 'next/link'
-import { useQuery } from 'convex/react'
-import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
-import { BookGridList, BookGridSkeleton } from '@/components/books/BookGrid'
+import { SuperadminOnly } from '@/components/auth/SuperadminOnly'
+import { BookGridList } from '@/components/books/BookGrid'
 import { DataDebugPanel } from '@/components/ui/DataDebugPanel'
 import { PageContainer } from '@/components/ui/PageContainer'
 
@@ -13,16 +10,11 @@ type PublisherPageProps = {
   params: Promise<{ slug: string }>
 }
 
-type PublisherPageData = NonNullable<FunctionReturnType<typeof api.publishers.queries.getBySlugWithBooks>>
-type PublisherBook = PublisherPageData['books'][number]
+export const revalidate = 3600
 
-export default function PublisherPage({ params }: PublisherPageProps) {
-  const { slug } = use(params)
-  const publisher = useQuery(api.publishers.queries.getBySlugWithBooks, { slug })
-
-  if (publisher === undefined) {
-    return <PublisherDetailSkeleton />
-  }
+export default async function PublisherPage({ params }: PublisherPageProps) {
+  const { slug } = await params
+  const publisher = await fetchQuery(api.publishers.queries.getBySlugWithBooks, { slug })
 
   if (publisher === null) {
     return (
@@ -55,22 +47,9 @@ export default function PublisherPage({ params }: PublisherPageProps) {
         <BookGridList books={publisher.books} />
       )}
 
-      <DataDebugPanel data={publisher} label='Publisher Data' />
-    </PageContainer>
-  )
-}
-
-function PublisherDetailSkeleton() {
-  return (
-    <PageContainer>
-      <div className='h-4 w-32 bg-muted rounded animate-pulse mb-6' />
-
-      <div className='mb-8'>
-        <div className='h-8 bg-muted rounded animate-pulse w-1/3 mb-2' />
-        <div className='h-4 bg-muted rounded animate-pulse w-1/4' />
-      </div>
-
-      <BookGridSkeleton count={6} />
+      <SuperadminOnly>
+        <DataDebugPanel data={publisher} label='Publisher Data' />
+      </SuperadminOnly>
     </PageContainer>
   )
 }

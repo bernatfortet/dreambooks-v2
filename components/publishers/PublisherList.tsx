@@ -1,6 +1,3 @@
-'use client'
-
-import { useQuery } from 'convex/react'
 import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
 import Image from 'next/image'
@@ -9,13 +6,11 @@ import Link from 'next/link'
 type PublisherListData = NonNullable<FunctionReturnType<typeof api.publishers.queries.listWithTopBooks>>
 type PublisherListItem = PublisherListData[number]
 
-export function PublisherList() {
-  const publishers: PublisherListData | undefined = useQuery(api.publishers.queries.listWithTopBooks)
+type PublisherListProps = {
+  publishers: PublisherListData
+}
 
-  if (publishers === undefined) {
-    return <PublisherListSkeleton />
-  }
-
+export function PublisherList({ publishers }: PublisherListProps) {
   if (publishers.length === 0) {
     return <p className='text-center text-muted-foreground py-12'>No publishers yet.</p>
   }
@@ -95,26 +90,6 @@ function PublisherItem({ slug, name, bookCount, books }: PublisherItemProps) {
           </div>
         )}
       </div>
-    </div>
-  )
-}
-
-function PublisherListSkeleton() {
-  return (
-    <div className='space-y-8'>
-      {Array.from({ length: 5 }).map((_, index) => (
-        <div key={index} className='flex gap-4'>
-          <div className='w-16 h-16 rounded-lg bg-muted animate-pulse shrink-0' />
-          <div className='flex-1 space-y-3'>
-            <div className='h-6 bg-muted rounded animate-pulse w-48' />
-            <div className='flex gap-3'>
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className='w-20 aspect-2/3 bg-muted rounded-lg animate-pulse shrink-0' />
-              ))}
-            </div>
-          </div>
-        </div>
-      ))}
     </div>
   )
 }

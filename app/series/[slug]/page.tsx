@@ -1,28 +1,23 @@
-'use client'
-
-import { use } from 'react'
+import { fetchQuery } from 'convex/nextjs'
 import Link from 'next/link'
-import { useQuery } from 'convex/react'
 import { api } from '@/convex/_generated/api'
+import { SuperadminOnly } from '@/components/auth/SuperadminOnly'
 import { BookCardBadge } from '@/components/books/BookCard'
-import { useSuperadmin } from '@/components/auth/use-superadmin'
+import { SeriesProfileActions } from '@/components/series/SeriesProfileActions'
 import { SeriesAdminPanel } from '@/components/series/SeriesAdminPanel'
 import { DataDebugPanel } from '@/components/ui/DataDebugPanel'
-import { BookGridList, BookGridSkeleton } from '@/components/books/BookGrid'
+import { BookGridList } from '@/components/books/BookGrid'
 import { PageContainer } from '@/components/ui/PageContainer'
 
 type SeriesPageProps = {
   params: Promise<{ slug: string }>
 }
 
-export default function SeriesPage({ params }: SeriesPageProps) {
-  const { slug } = use(params)
-  const series = useQuery(api.series.queries.getWithBooksBySlugOrId, { slugOrId: slug })
-  const { isSuperadmin } = useSuperadmin()
+export const revalidate = 3600
 
-  if (series === undefined) {
-    return <SeriesDetailSkeleton />
-  }
+export default async function SeriesPage({ params }: SeriesPageProps) {
+  const { slug } = await params
+  const series = await fetchQuery(api.series.queries.getWithBooksBySlugOrId, { slugOrId: slug })
 
   if (series === null) {
     return (
@@ -51,6 +46,10 @@ export default function SeriesPage({ params }: SeriesPageProps) {
         <p className='text-sm text-muted-foreground mt-2'>
           {series.books.length} {series.books.length === 1 ? 'book' : 'books'}
         </p>
+
+        <div className='mt-4'>
+          <SeriesProfileActions seriesId={series._id} />
+        </div>
       </div>
 
       {series.books.length === 0 ? (
@@ -59,9 +58,13 @@ export default function SeriesPage({ params }: SeriesPageProps) {
         <BookGridList books={booksWithOrderBadges} />
       )}
 
-      {isSuperadmin ? <SeriesAdminPanel seriesId={series._id} /> : null}
+      <SuperadminOnly>
+        <SeriesAdminPanel seriesId={series._id} />
+      </SuperadminOnly>
 
-      {isSuperadmin ? <DataDebugPanel data={series} label='Series Data' /> : null}
+      <SuperadminOnly>
+        <DataDebugPanel data={series} label='Series Data' />
+      </SuperadminOnly>
     </PageContainer>
   )
 }
@@ -81,17 +84,3 @@ function buildBooksWithOrderBadges<
   })
 }
 
-function SeriesDetailSkeleton() {
-  return (
-    <PageContainer>
-      <div className='h-4 w-24 bg-muted rounded animate-pulse mb-6' />
-
-      <div className='mb-8'>
-        <div className='h-8 bg-muted rounded animate-pulse w-1/3 mb-2' />
-        <div className='h-4 bg-muted rounded animate-pulse w-1/4' />
-      </div>
-
-      <BookGridSkeleton count={6} />
-    </PageContainer>
-  )
-}

@@ -1,20 +1,20 @@
-'use client'
-
-import { use } from 'react'
+import { fetchQuery } from 'convex/nextjs'
 import Link from 'next/link'
 import Image from 'next/image'
-import { useQuery } from 'convex/react'
 import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
 import { AwardGrid } from '@/components/awards/AwardGrid'
-import { BookGridList, BookGridSkeleton } from '@/components/books/BookGrid'
+import { BookGridList } from '@/components/books/BookGrid'
 import { DataDebugPanel } from '@/components/ui/DataDebugPanel'
-import { AwardHonorMarker, AwardWinnerMarker } from '@/components/awards/AwardResultMarker'
+import { SuperadminOnly } from '@/components/auth/SuperadminOnly'
+import { getAwardTitleMarkerByResultType } from '@/components/awards/AwardResultMarker'
 import { PageContainer } from '@/components/ui/PageContainer'
 
 type AwardPageProps = {
   params: Promise<{ slug: string }>
 }
+
+export const revalidate = 3600
 
 type AwardPageData = NonNullable<FunctionReturnType<typeof api.awards.queries.getWithBooksBySlug>>
 type AwardBook = AwardPageData['books'][number]
@@ -23,13 +23,12 @@ type AwardBookGroup = {
   books: AwardBook[]
 }
 
-export default function AwardPage({ params }: AwardPageProps) {
-  const { slug } = use(params)
-  const award = useQuery(api.awards.queries.getWithBooksBySlug, { slug })
-
-  if (award === undefined) {
-    return <AwardDetailSkeleton />
-  }
+export default async function AwardPage({ params }: AwardPageProps) {
+  const { slug } = await params
+  const [award, awards] = await Promise.all([
+    fetchQuery(api.awards.queries.getWithBooksBySlug, { slug }),
+    fetchQuery(api.awards.queries.list, {}),
+  ])
 
   if (award === null) {
     return (
@@ -85,12 +84,15 @@ export default function AwardPage({ params }: AwardPageProps) {
         </div>
 
         <AwardGrid
+          awards={awards}
           excludedAwardId={award._id}
           emptyState={<p className='py-12 text-center text-muted-foreground'>No other awards yet.</p>}
         />
       </section>
 
-      <DataDebugPanel data={award} label='Award Data' />
+      <SuperadminOnly>
+        <DataDebugPanel data={award} label='Award Data' />
+      </SuperadminOnly>
     </PageContainer>
   )
 }
@@ -111,14 +113,8 @@ function AwardYearSection({ group }: { group: AwardBookGroup }) {
 }
 
 function getAwardTitleMarker(category?: string | null) {
-  if (category === 'Winner') {
-    return <AwardWinnerMarker />
-  }
-
-  if (category === 'Honor Book') {
-    return <AwardHonorMarker />
-  }
-
+  if (category === 'Winner') return getAwardTitleMarkerByResultType('winner')
+  if (category === 'Honor Book') return getAwardTitleMarkerByResultType('honor')
   return undefined
 }
 
@@ -160,23 +156,3 @@ function formatBookCountLabel(count: number) {
   return `${count} ${count === 1 ? 'book' : 'books'}`
 }
 
-function AwardDetailSkeleton() {
-  return (
-    <PageContainer>
-      <div className='h-4 w-24 bg-muted rounded animate-pulse mb-6' />
-
-      <div className='mb-8'>
-        <div className='flex items-start gap-6'>
-          <div className='w-24 h-24 bg-muted rounded-lg animate-pulse shrink-0' />
-          <div className='flex-1 space-y-2'>
-            <div className='h-8 bg-muted rounded animate-pulse w-1/3' />
-            <div className='h-4 bg-muted rounded animate-pulse w-full' />
-            <div className='h-4 bg-muted rounded animate-pulse w-1/4' />
-          </div>
-        </div>
-      </div>
-
-      <BookGridSkeleton count={6} />
-    </PageContainer>
-  )
-}

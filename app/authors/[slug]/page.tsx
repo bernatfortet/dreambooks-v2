@@ -1,13 +1,14 @@
-'use client'
-
+import { fetchQuery } from 'convex/nextjs'
 import type { FunctionReturnType } from 'convex/server'
-import { use } from 'react'
+import type { Metadata } from 'next'
 import Link from 'next/link'
 import Image from 'next/image'
-import { useQuery } from 'convex/react'
+import { ArrowLeft, ExternalLink, Instagram } from 'lucide-react'
 import { api } from '@/convex/_generated/api'
-import { useSuperadmin } from '@/components/auth/use-superadmin'
+import { SuperadminOnly } from '@/components/auth/SuperadminOnly'
 import { AuthorAdminPanel } from '@/components/authors/AuthorAdminPanel'
+import { AuthorProfileActions } from '@/components/authors/AuthorProfileActions'
+import { ExpandableDescription } from '@/components/books/ExpandableDescription'
 import { BookMasonryList } from '@/components/books/masonry'
 import { DataDebugPanel } from '@/components/ui/DataDebugPanel'
 import { PageContainer } from '@/components/ui/PageContainer'
@@ -16,22 +17,41 @@ type AuthorPageProps = {
   params: Promise<{ slug: string }>
 }
 
+export const revalidate = 3600
+
 type AuthorData = NonNullable<FunctionReturnType<typeof api.authors.queries.getBySlugOrId>>
+type AuthorBook = AuthorData['books'][number]
 
-export default function AuthorPage({ params }: AuthorPageProps) {
-  const { slug } = use(params)
-  const author = useQuery(api.authors.queries.getBySlugOrId, { slugOrId: slug })
-  const { isSuperadmin } = useSuperadmin()
+export async function generateMetadata({ params }: AuthorPageProps): Promise<Metadata> {
+  const { slug } = await params
+  const author = await fetchQuery(api.authors.queries.getBySlugOrId, { slugOrId: slug })
 
-  if (author === undefined) {
-    return <AuthorDetailSkeleton />
+  if (!author) return { title: 'Author Not Found' }
+
+  const description = author.bio
+    ? author.bio.slice(0, 155) + (author.bio.length > 155 ? '…' : '')
+    : `Explore ${author.bookCount} ${author.bookCount === 1 ? 'book' : 'books'} by ${author.name} on Dreambooks.`
+
+  return {
+    title: author.name,
+    description,
+    openGraph: {
+      title: author.name,
+      description,
+      ...(author.imageUrlLarge ?? author.imageUrl ? { images: [author.imageUrlLarge ?? author.imageUrl!] } : {}),
+    },
   }
+}
+
+export default async function AuthorPage({ params }: AuthorPageProps) {
+  const { slug } = await params
+  const author = await fetchQuery(api.authors.queries.getBySlugOrId, { slugOrId: slug })
 
   if (author === null) {
     return (
       <PageContainer>
         <BackToAuthorsLink className='mb-4' />
-        <p className='text-muted-foreground'>Author not found</p>
+        <p className='text-muted-foreground'>Author not found.</p>
       </PageContainer>
     )
   }
@@ -40,11 +60,12 @@ export default function AuthorPage({ params }: AuthorPageProps) {
     <PageContainer>
       <BackToAuthorsLink />
 
-      <div className='mb-8 flex flex-col gap-8 md:flex-row'>
+      <div className='mb-10 flex flex-col items-center gap-6 md:flex-row md:items-start md:gap-10'>
         <AuthorImage imageUrl={author.imageUrlLarge ?? author.imageUrl} name={author.name} />
 
-        <div className='flex-1'>
+        <div className='min-w-0 flex-1 text-center md:text-left'>
           <AuthorHeader
+            authorId={author._id}
             name={author.name}
             bio={author.bio}
             bookCount={author.bookCount}
@@ -54,39 +75,50 @@ export default function AuthorPage({ params }: AuthorPageProps) {
         </div>
       </div>
 
-      {author.books.length > 0 ? <AuthorBooks books={author.books} /> : null}
+      {author.books.length > 0 && <AuthorBooks books={author.books} />}
 
-      {isSuperadmin ? <AuthorAdminPanel author={author} /> : null}
+      <SuperadminOnly>
+        <AuthorAdminPanel author={author} />
+      </SuperadminOnly>
 
-      {isSuperadmin ? <DataDebugPanel data={author} label='Author Data' /> : null}
+      <SuperadminOnly>
+        <DataDebugPanel data={author} label='Author Data' />
+      </SuperadminOnly>
     </PageContainer>
   )
 }
 
 function BackToAuthorsLink({ className = 'mb-6' }: { className?: string }) {
   return (
-    <Link href='/authors' className={`text-sm text-muted-foreground hover:underline block ${className}`}>
-      ← Back to authors
+    <Link
+      href='/authors'
+      className={`group inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground ${className}`}
+    >
+      <ArrowLeft aria-hidden='true' className='size-3.5 transition-transform group-hover:-translate-x-0.5' />
+      Back to Authors
     </Link>
   )
 }
 
 function AuthorImage({ imageUrl, name }: { imageUrl: string | null; name: string }) {
   return (
-    <div className='shrink-0 mx-auto md:mx-0'>
+    <div className='shrink-0'>
       {imageUrl ? (
-        <div className='relative w-32 h-32 md:w-48 md:h-48'>
+        <div className='relative size-28 md:size-36'>
           <Image
             src={imageUrl}
-            alt={name}
+            alt={`Photo of ${name}`}
             fill
-            className='object-cover object-center rounded-full'
-            sizes='(max-width: 768px) 128px, 192px'
+            priority
+            className='rounded-full object-cover object-center'
+            sizes='(max-width: 768px) 112px, 144px'
           />
         </div>
       ) : (
-        <div className='w-32 h-32 md:w-48 md:h-48 rounded-full bg-muted flex items-center justify-center'>
-          <span className='text-muted-foreground text-2xl font-medium'>{name.charAt(0).toUpperCase()}</span>
+        <div className='flex size-28 items-center justify-center rounded-full bg-muted md:size-36'>
+          <span className='text-2xl font-semibold text-muted-foreground md:text-3xl'>
+            {name.charAt(0).toUpperCase()}
+          </span>
         </div>
       )}
     </div>
@@ -94,72 +126,96 @@ function AuthorImage({ imageUrl, name }: { imageUrl: string | null; name: string
 }
 
 function AuthorHeader(params: {
+  authorId: AuthorData['_id']
   name: string
   bio: string | null
   bookCount: number
   instagramHandle: string | null
   instagramUrl: string | null
 }) {
-  const { name, bio, bookCount, instagramHandle, instagramUrl } = params
+  const { authorId, name, bio, bookCount, instagramHandle, instagramUrl } = params
 
   return (
     <div>
-      <h1 className='text-3xl font-bold'>{name}</h1>
-      {bio && <p className='text-muted-foreground mt-2 leading-relaxed'>{bio}</p>}
-      {instagramHandle && instagramUrl ? (
-        <p className='mt-3 text-sm'>
+      <h1 className='text-3xl font-bold tracking-tight text-pretty'>{name}</h1>
+
+      <div className='mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground'>
+        <p>
+          {bookCount} {bookCount === 1 ? 'book' : 'books'}
+        </p>
+
+        {instagramHandle && instagramUrl && (
           <a
             href={instagramUrl}
             target='_blank'
             rel='noreferrer'
-            className='text-muted-foreground hover:text-foreground hover:underline'
+            className='inline-flex items-center gap-1.5 transition-colors hover:text-foreground'
           >
-            Instagram: @{instagramHandle}
+            <Instagram aria-hidden='true' className='size-3.5' />
+            @{instagramHandle}
+            <ExternalLink aria-hidden='true' className='size-3' />
           </a>
-        </p>
-      ) : null}
-      <p className='text-sm text-muted-foreground mt-2'>
-        {bookCount} {bookCount === 1 ? 'book' : 'books'}
-      </p>
+        )}
+
+        <AuthorProfileActions authorId={authorId} />
+      </div>
+
+      {bio && (
+        <div className='mt-4'>
+          <ExpandableDescription description={bio} />
+        </div>
+      )}
     </div>
   )
 }
 
 function AuthorBooks({ books }: { books: AuthorData['books'] }) {
+  const sortedBooks = sortAuthorBooks(books)
+  const masonryBooks = sortedBooks.map((book: AuthorBook) => ({ ...book, authors: book.authors ?? [] }))
+
   return (
-    <section className='space-y-4'>
-      <h2 className='font-semibold mb-4'>Books</h2>
-      <BookMasonryList books={books.map((book) => ({ ...book, authors: book.authors ?? [] }))} />
+    <section>
+      <h2 className='mb-5 text-xl font-semibold text-pretty'>Books</h2>
+      <BookMasonryList books={masonryBooks} layoutMode='row-major' />
     </section>
   )
 }
 
-function AuthorDetailSkeleton() {
-  return (
-    <PageContainer>
-      <div className='h-4 w-24 bg-muted rounded animate-pulse mb-6' />
+function sortAuthorBooks(books: AuthorData['books']): AuthorData['books'] {
+  return books.toSorted((leftBook: AuthorBook, rightBook: AuthorBook) => {
+    const leftSeriesKey = getSeriesSortKey(leftBook)
+    const rightSeriesKey = getSeriesSortKey(rightBook)
 
-      <div className='mb-8 flex flex-col gap-8 md:flex-row'>
-        <div className='w-32 h-32 md:w-48 md:h-48 rounded-full bg-muted animate-pulse shrink-0' />
+    if (leftSeriesKey && rightSeriesKey) {
+      if (leftSeriesKey !== rightSeriesKey) {
+        return leftSeriesKey.localeCompare(rightSeriesKey)
+      }
 
-        <div className='flex-1 space-y-4'>
-          <div className='h-8 bg-muted rounded animate-pulse w-1/3' />
-          <div className='h-20 bg-muted rounded animate-pulse' />
-          <div className='h-4 bg-muted rounded animate-pulse w-24' />
-        </div>
-      </div>
+      return compareBooksWithinSeries(leftBook, rightBook)
+    }
 
-      <div className='space-y-4'>
-        <div className='h-6 bg-muted rounded animate-pulse w-20' />
-        <div className='grid grid-cols-2 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6'>
-          {Array.from({ length: 6 }).map((_, index) => (
-            <div key={index} className='space-y-2'>
-              <div className='aspect-2/3 bg-muted rounded-md animate-pulse' />
-              <div className='h-4 bg-muted rounded animate-pulse w-3/4' />
-            </div>
-          ))}
-        </div>
-      </div>
-    </PageContainer>
-  )
+    if (leftSeriesKey) return -1
+    if (rightSeriesKey) return 1
+
+    return leftBook.title.localeCompare(rightBook.title)
+  })
 }
+
+function compareBooksWithinSeries(leftBook: AuthorBook, rightBook: AuthorBook) {
+  const leftSeriesPosition = leftBook.seriesPosition ?? Number.POSITIVE_INFINITY
+  const rightSeriesPosition = rightBook.seriesPosition ?? Number.POSITIVE_INFINITY
+
+  if (leftSeriesPosition !== rightSeriesPosition) {
+    return leftSeriesPosition - rightSeriesPosition
+  }
+
+  return leftBook.title.localeCompare(rightBook.title)
+}
+
+function getSeriesSortKey(book: AuthorBook) {
+  if (book.seriesId) return `id:${book.seriesId}`
+  if (book.seriesName) return `name:${book.seriesName.toLowerCase()}`
+
+  return null
+}
+
