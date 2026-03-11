@@ -38,6 +38,10 @@ type CoverOption = {
   badReason?: string
 }
 
+type CoverPreviewStyle = {
+  aspectRatio: string
+}
+
 type ChangeCoverDialogProps = {
   bookId: Id<'books'>
   currentCoverUrl?: string | null
@@ -122,8 +126,11 @@ export function ChangeCoverDialog({ bookId, currentCoverUrl }: ChangeCoverDialog
                   isSelecting === option.id && 'opacity-70',
                 )}
               >
-                <div className='relative aspect-2/3 bg-muted rounded overflow-hidden mb-2'>
-                  <Image src={option.imageUrl} alt='Cover option' fill className='object-cover' sizes='(max-width: 768px) 33vw, 20vw' />
+                <div
+                  className='relative bg-muted rounded overflow-hidden mb-2'
+                  style={getCoverPreviewStyle(option.width, option.height)}
+                >
+                  <Image src={option.imageUrl} alt='Cover option' fill className='object-contain' sizes='(max-width: 768px) 33vw, 20vw' />
                   {option.isCurrent && (
                     <div className='absolute inset-0 bg-primary/20 flex items-center justify-center'>
                       <Badge>Current</Badge>
@@ -230,4 +237,19 @@ function buildCoverOptions(
     const bRes = (b.width ?? 0) * (b.height ?? 0)
     return bRes - aRes
   })
+}
+
+function getCoverPreviewStyle(width?: number, height?: number): CoverPreviewStyle {
+  const aspectRatio = getCoverAspectRatio(width, height)
+
+  return {
+    aspectRatio: String(aspectRatio),
+  }
+}
+
+function getCoverAspectRatio(width?: number, height?: number): number {
+  if (!width || !height) return 2 / 3
+  if (width <= 0 || height <= 0) return 2 / 3
+
+  return width / height
 }
