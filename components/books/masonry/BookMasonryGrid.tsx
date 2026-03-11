@@ -10,7 +10,7 @@ import { PaginatedCollectionSection } from '@/components/collections/PaginatedCo
 import { Id } from '@/convex/_generated/dataModel'
 import type { BookFilters } from '../filters/types'
 import { BookMasonryCard } from './BookMasonryCard'
-import { calculateMasonryLayout, type MasonryItem } from './useMasonryLayout'
+import { calculateMasonryLayout, type MasonryItem, type MasonryLayoutMode } from './useMasonryLayout'
 import { getColumnCount, getColumnWidth, MASONRY_GAP } from './constants'
 
 const BOOK_PAGE_SIZE = 24
@@ -55,9 +55,10 @@ type BookMasonryListProps = {
   books: BookMasonryItem[]
   className?: string
   showProfileActions?: boolean
+  layoutMode?: MasonryLayoutMode
 }
 
-export function BookMasonryList({ books, className, showProfileActions = true }: BookMasonryListProps) {
+export function BookMasonryList({ books, className, showProfileActions = true, layoutMode = 'masonry' }: BookMasonryListProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState<number | null>(null)
   const [measuredDimensionsById, setMeasuredDimensionsById] = useState<Record<string, MeasuredDimensions>>({})
@@ -94,8 +95,8 @@ export function BookMasonryList({ books, className, showProfileActions = true }:
       coverHeight: measuredDimensionsById[book._id]?.height ?? book.coverHeight,
     }))
 
-    return calculateMasonryLayout(masonryItems, containerWidth, columnCount, MASONRY_GAP)
-  }, [containerWidth, books, measuredDimensionsById])
+    return calculateMasonryLayout(masonryItems, containerWidth, columnCount, MASONRY_GAP, layoutMode)
+  }, [containerWidth, books, layoutMode, measuredDimensionsById])
 
   if (books.length === 0) {
     return <p className='text-center text-muted-foreground py-12'>No books yet.</p>

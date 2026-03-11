@@ -1,18 +1,28 @@
 'use client'
 
-import Image from 'next/image'
+import type { SyntheticEvent } from 'react'
+import { useState } from 'react'
 import { ProgressiveImage } from '@/components/ui/ProgressiveImage'
 import { api } from '@/convex/_generated/api'
+import { getBookCoverKey } from '@/lib/book-cover'
+import { getNaturalImageDimensions, type ImageDimensions } from '@/lib/image-dimensions'
 import type { FunctionReturnType } from 'convex/server'
 
 const NAV_HEIGHT = 52
 const COVER_HEIGHT = `calc(100vh - ${NAV_HEIGHT}px - 80px)`
+const LANDSCAPE_MAX_HEIGHT = '500px'
 const LANDSCAPE_THRESHOLD = 1.05
 
 type Book = NonNullable<FunctionReturnType<typeof api.books.queries.getBySlugOrId>>
 
 type BookCoverProps = {
   book: Book
+  onLandscapeChange?: (isLandscape: boolean) => void
+}
+
+type MeasuredCover = {
+  coverKey: string
+  dimensions: ImageDimensions
 }
 
 export function isLandscapeCover(width?: number, height?: number): boolean {
@@ -20,49 +30,71 @@ export function isLandscapeCover(width?: number, height?: number): boolean {
   return width / height > LANDSCAPE_THRESHOLD
 }
 
-export function BookCover({ book }: BookCoverProps) {
+export function BookCover({ book, onLandscapeChange }: BookCoverProps) {
   const title = book.title
   const coverUrl = book.cover?.url ?? null
   const coverUrlFull = book.cover?.urlFull ?? null
-  const coverWidth = book.cover?.width
-  const coverHeight = book.cover?.height
-
-  const isLandscape = isLandscapeCover(coverWidth, coverHeight)
-  const coverAspectRatio = getCoverAspectRatio(coverWidth, coverHeight)
-  const coverStyle = getCoverStyle(coverAspectRatio, isLandscape)
-
-  // Landscape covers get full width, portrait covers get side-by-side layout
-  const containerClass = isLandscape
-    ? 'shrink-0 w-full max-w-[800px]'
-    : 'shrink-0 w-full max-w-[80vw] md:max-w-[600px] md:w-auto self-start'
+  const coverKey = getBookCoverKey(book)
+  const [measuredCover, setMeasuredCover] = useState<MeasuredCover | null>(null)
+  const measuredDimensions = measuredCover?.coverKey === coverKey ? measuredCover.dimensions : null
+  const coverDimensions = getResolvedCoverDimensions(measuredDimensions, book.cover)
+  const isLandscape = isLandscapeCover(coverDimensions.width, coverDimensions.height)
+  const maxHeight = getCoverMaxHeight(isLandscape)
+  const containerClass = getCoverContainerClass(isLandscape)
 
   return (
-    <div className={containerClass} style={coverStyle}>
-      <BookCoverImage coverUrl={coverUrl} coverUrlFull={coverUrlFull} title={title} />
+    <div className={containerClass}>
+      <BookCoverImage
+        coverUrl={coverUrl}
+        coverUrlFull={coverUrlFull}
+        title={title}
+        maxHeight={maxHeight}
+        onDimensionsResolved={handleDimensionsResolved}
+      />
     </div>
   )
+
+  function handleDimensionsResolved(dimensions: ImageDimensions) {
+    if (measuredCover?.coverKey === coverKey && areDimensionsEqual(measuredCover.dimensions, dimensions)) return
+
+    setMeasuredCover({ coverKey, dimensions })
+    onLandscapeChange?.(isLandscapeCover(dimensions.width, dimensions.height))
+  }
 }
 
 export function BookCoverSkeleton() {
-  const coverStyle = getCoverStyle(2 / 3, false)
-
   return (
-    <div className='shrink-0 w-full max-w-[80vw] md:max-w-[600px] md:w-auto self-start' style={coverStyle}>
-      <div className='bg-muted rounded-lg animate-pulse w-full h-full' />
+    <div className='shrink-0 w-full md:w-fit max-w-[80vw] md:max-w-[600px] self-start'>
+      <div className='bg-muted rounded-lg animate-pulse aspect-2/3 w-full' style={{ maxHeight: COVER_HEIGHT }} />
     </div>
   )
 }
 
-function BookCoverImage({ coverUrl, coverUrlFull, title }: { coverUrl?: string | null; coverUrlFull?: string | null; title: string }) {
+function BookCoverImage({
+  coverUrl,
+  coverUrlFull,
+  title,
+  maxHeight,
+  onDimensionsResolved,
+}: {
+  coverUrl?: string | null
+  coverUrlFull?: string | null
+  title: string
+  maxHeight: string
+  onDimensionsResolved: (dimensions: ImageDimensions) => void
+}) {
+  const imageStyle = { maxHeight }
+
   if (coverUrlFull && coverUrl) {
     return (
-      <div className='relative overflow-hidden rounded-lg shadow-lg w-full h-full'>
+      <div className='max-w-full'>
         <ProgressiveImage
           lowResSrc={coverUrl}
           highResSrc={coverUrlFull}
           alt={title}
-          className='w-full h-full'
-          sizes='(max-width: 768px) 80vw, 600px'
+          className='max-w-full'
+          imageStyle={imageStyle}
+          onDimensionsResolved={onDimensionsResolved}
           priority
         />
       </div>
@@ -71,47 +103,60 @@ function BookCoverImage({ coverUrl, coverUrlFull, title }: { coverUrl?: string |
 
   if (coverUrl) {
     return (
-      <div className='relative overflow-hidden rounded-lg shadow-lg w-full h-full'>
-        <Image src={coverUrl} alt={title} fill className='object-contain' sizes='(max-width: 768px) 80vw, 600px' priority />
+      <div className='max-w-full'>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={coverUrl}
+          alt={title}
+          className='block h-auto w-auto max-w-full rounded-lg shadow-lg'
+          decoding='async'
+          fetchPriority='high'
+          loading='eager'
+          onLoad={handleImageLoad}
+          style={imageStyle}
+        />
       </div>
     )
   }
 
   return (
-    <div className='bg-muted rounded-lg flex items-center justify-center w-full h-full'>
+    <div className='bg-muted rounded-lg flex items-center justify-center aspect-2/3 w-full' style={imageStyle}>
       <span className='text-muted-foreground text-center p-4'>{title}</span>
     </div>
   )
-}
 
-type CoverStyle = {
-  width: string
-  height: string
-  maxWidth: string
-  maxHeight: string
-  aspectRatio: string
-}
+  function handleImageLoad(event: SyntheticEvent<HTMLImageElement>) {
+    const dimensions = getNaturalImageDimensions(event.currentTarget)
+    if (!dimensions) return
 
-/**
- * Returns the aspect ratio for a book cover.
- *
- * IMPORTANT: Always use the actual stored dimensions. Never force landscape
- * covers into portrait ratios - this causes visual distortion. The layout
- * in BookPage adapts based on isLandscapeCover() to handle both orientations.
- */
-function getCoverAspectRatio(coverWidth?: number, coverHeight?: number): number {
-  if (!coverWidth || !coverHeight) return 2 / 3
-  if (coverWidth <= 0 || coverHeight <= 0) return 2 / 3
-
-  return coverWidth / coverHeight
-}
-
-function getCoverStyle(coverAspectRatio: number, isLandscape: boolean): CoverStyle {
-  return {
-    width: '100%',
-    height: 'auto',
-    maxWidth: isLandscape ? '800px' : '600px',
-    maxHeight: isLandscape ? '500px' : COVER_HEIGHT,
-    aspectRatio: String(coverAspectRatio),
+    onDimensionsResolved(dimensions)
   }
+}
+
+function areDimensionsEqual(current: ImageDimensions | null, next: ImageDimensions): boolean {
+  if (!current) return false
+
+  return current.width === next.width && current.height === next.height
+}
+
+function getResolvedCoverDimensions(
+  loadedCoverDimensions: ImageDimensions | null,
+  cover: { width?: number; height?: number } | null | undefined,
+): ImageDimensions {
+  return {
+    width: loadedCoverDimensions?.width ?? cover?.width ?? 0,
+    height: loadedCoverDimensions?.height ?? cover?.height ?? 0,
+  }
+}
+
+function getCoverMaxHeight(isLandscape: boolean): string {
+  if (isLandscape) return LANDSCAPE_MAX_HEIGHT
+
+  return COVER_HEIGHT
+}
+
+function getCoverContainerClass(isLandscape: boolean): string {
+  if (isLandscape) return 'shrink-0 w-full md:w-fit max-w-[800px] self-start'
+
+  return 'shrink-0 w-full md:w-fit max-w-[80vw] md:max-w-[600px] self-start'
 }
