@@ -1,9 +1,7 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { useSuperadmin } from '@/components/auth/use-superadmin'
-import { BookMasonryCard } from '@/components/books/masonry/BookMasonryCard'
-import { BookMasonryGrid, type BookMasonryItem } from '@/components/books/masonry'
+import { BookMasonryGrid, BookMasonryList, type BookMasonryItem } from '@/components/books/masonry'
 import type { Id } from '@/convex/_generated/dataModel'
 import type { BookFilters } from './filters/types'
 
@@ -44,39 +42,9 @@ type BookGridListProps = {
 }
 
 export function BookGridList({ books, className }: BookGridListProps) {
-  const { isSuperadmin } = useSuperadmin()
+  const normalizedBooks = books.map(normalizeBookForMasonry)
 
-  return (
-    <BookGridContainer className={className}>
-      {books.map((book, index) => {
-        const normalizedBook = normalizeBookForMasonry(book)
-        const coverAspectRatio =
-          normalizedBook.coverWidth > 0 && normalizedBook.coverHeight > 0
-            ? normalizedBook.coverWidth / normalizedBook.coverHeight
-            : 2 / 3
-
-        return (
-          <BookMasonryCard
-            key={normalizedBook._id}
-            bookId={normalizedBook._id}
-            slug={normalizedBook.slug ?? normalizedBook._id}
-            title={normalizedBook.title}
-            authors={normalizedBook.authors}
-            coverUrl={normalizedBook.coverUrl}
-            dominantColor={normalizedBook.dominantColor}
-            seriesPosition={normalizedBook.seriesPosition}
-            badge={normalizedBook.badge}
-            titleMarker={normalizedBook.titleMarker}
-            canManageBooks={isSuperadmin}
-            style={{}}
-            imageHeight={0}
-            imageAspectRatio={coverAspectRatio}
-            priority={index < 12}
-          />
-        )
-      })}
-    </BookGridContainer>
-  )
+  return <BookMasonryList books={normalizedBooks} className={className} />
 }
 
 type BookGridProps = {
