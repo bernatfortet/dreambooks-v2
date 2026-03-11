@@ -21,7 +21,7 @@ import { api } from '@/convex/_generated/api'
 
 type ProcessBookResult = {
   success: boolean
-  bookId?: string
+  bookId?: Id<'books'>
 }
 
 /**
@@ -170,7 +170,7 @@ async function processBookAttempt(params: {
       return { success: false }
     }
 
-    let bookId: string
+    let bookId: Id<'books'>
 
     try {
       const importResult = await importBookToConvex({
@@ -180,6 +180,7 @@ async function processBookAttempt(params: {
         skipCoverDownload: item.skipCoverDownload,
         firstSeenFromUrl: item.referrerUrl,
         firstSeenReason: item.referrerReason,
+        targetBookId: item.bookId,
       })
 
       bookId = importResult.bookId
@@ -220,7 +221,7 @@ async function processBookAttempt(params: {
     // Mark queue item complete
     await markQueueItemComplete({
       queueId: item._id,
-      bookId: bookId as Id<'books'>,
+      bookId,
     })
 
     incrementScrapingCount()

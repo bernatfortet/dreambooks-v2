@@ -4,6 +4,7 @@ import { internal } from '../_generated/api'
 import { generateUniqueSlug, generateUniqueBookSlug } from '../lib/slug'
 import { deleteScrapeArtifacts, clearScrapeQueueReferences, deleteStorageFile } from '../lib/deleteHelpers'
 import { requireSuperadmin } from '../lib/superadmin'
+import { extractAsin, normalizeAmazonUrl } from '@/lib/scraping/utils/amazon-url'
 import { buildSearchText } from './lib/searchText'
 import type { DatabaseReader, MutationCtx } from '../_generated/server'
 import type { Doc, Id } from '../_generated/dataModel'
@@ -301,6 +302,8 @@ export const markNeedsReview = mutation({
   },
   returns: v.null(),
   handler: async (context, args) => {
+    await requireSuperadmin(context)
+
     const book = await context.db.get(args.bookId)
     if (!book) {
       throw new Error('Book not found')
@@ -323,6 +326,8 @@ export const clearNeedsReview = mutation({
   },
   returns: v.null(),
   handler: async (context, args) => {
+    await requireSuperadmin(context)
+
     const book = await context.db.get(args.bookId)
     if (!book) {
       throw new Error('Book not found')
@@ -339,6 +344,51 @@ export const clearNeedsReview = mutation({
   },
 })
 
+export const updateAmazonUrl = mutation({
+  args: {
+    bookId: v.id('books'),
+    amazonUrl: v.string(),
+  },
+  returns: v.null(),
+  handler: async (context, args) => {
+    await requireSuperadmin(context)
+
+    const book = await context.db.get(args.bookId)
+    if (!book) {
+      throw new Error('Book not found')
+    }
+
+    const normalizedAmazonUrl = normalizeAmazonUrl(args.amazonUrl.trim())
+    const asin = extractAsin(normalizedAmazonUrl)
+    if (!asin) {
+      throw new Error('Invalid Amazon product URL')
+    }
+
+    const existingBookWithAsin = await context.db
+      .query('books')
+      .withIndex('by_asin', (q) => q.eq('asin', asin))
+      .unique()
+
+    if (existingBookWithAsin && existingBookWithAsin._id !== args.bookId) {
+      throw new Error(`ASIN ${asin} already belongs to another book`)
+    }
+
+    await context.db.patch(args.bookId, {
+      amazonUrl: normalizedAmazonUrl,
+    })
+
+    await context.runMutation(internal.scrapeQueue.mutations.queueExplicitRescrape, {
+      entityType: 'book',
+      url: normalizedAmazonUrl,
+      bookId: args.bookId,
+      displayName: book.title,
+      displayImageUrl: book.cover?.sourceUrl,
+    })
+
+    return null
+  },
+})
+
 export const hideBook = mutation({
   args: {
     bookId: v.id('books'),
@@ -346,6 +396,8 @@ export const hideBook = mutation({
   },
   returns: v.null(),
   handler: async (context, args) => {
+    await requireSuperadmin(context)
+
     const book = await context.db.get(args.bookId)
     if (!book) {
       throw new Error('Book not found')
@@ -371,6 +423,8 @@ export const unhideBook = mutation({
   },
   returns: v.null(),
   handler: async (context, args) => {
+    await requireSuperadmin(context)
+
     const book = await context.db.get(args.bookId)
     if (!book) {
       throw new Error('Book not found')

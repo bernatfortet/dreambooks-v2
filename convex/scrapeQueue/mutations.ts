@@ -4,9 +4,21 @@ import { SCRAPING_CONFIG } from '@/lib/scraping/config'
 import { SCRAPE_VERSIONS } from '../lib/scrapeVersions'
 import { extractAsin, extractAuthorId, extractSeriesId, normalizeAmazonUrl } from '@/lib/scraping/utils/amazon-url'
 import type { DatabaseReader, MutationCtx } from '../_generated/server'
+import type { Id } from '../_generated/dataModel'
 import { internal } from '../_generated/api'
+import { requireScrapeImportKey } from '../lib/scrapeImportAuth'
+import { requireSuperadmin } from '../lib/superadmin'
 
 const LEASE_DURATION_MS = SCRAPING_CONFIG.queue.leaseDurationMs
+
+async function requireQueueAdminAccess(context: MutationCtx, apiKey: string | undefined) {
+  if (apiKey) {
+    requireScrapeImportKey(apiKey)
+    return
+  }
+
+  await requireSuperadmin(context)
+}
 
 /**
  * URLs that should be skipped (non-book/product pages).
@@ -122,6 +134,7 @@ async function checkEntityExists(
  */
 export const enqueue = mutation({
   args: {
+    apiKey: v.optional(v.string()),
     url: v.string(),
     type: v.union(v.literal('book'), v.literal('series'), v.literal('author')),
     displayName: v.optional(v.string()),
@@ -134,7 +147,7 @@ export const enqueue = mutation({
     forceRescrape: v.optional(v.boolean()), // Skip entity existence check
     skipSeriesLink: v.optional(v.boolean()), // Book: don't upsert/link series
     skipAuthorDiscovery: v.optional(v.boolean()), // Book: don't queue authors
-    skipBookDiscoveries: v.optional(v.boolean()), // Series: don't queue books
+    skipBookDiscoveries: v.optional(v.boolean()), // Series/author: don't queue discovered books
     skipCoverDownload: v.optional(v.boolean()), // All: don't download cover/image
     bookIntakeId: v.optional(v.id('bookIntake')),
   },
@@ -156,6 +169,8 @@ export const enqueue = mutation({
     }),
   ),
   handler: async (context, args) => {
+    await requireQueueAdminAccess(context, args.apiKey)
+
     const cleanedUrl = cleanUrl(args.url, true) // Enable URL normalization logging
 
     // Skip hardcoded URLs (non-book/product pages)
@@ -392,10 +407,13 @@ export const updatePreview = mutation({
  */
 export const remove = mutation({
   args: {
+    apiKey: v.optional(v.string()),
     queueId: v.id('scrapeQueue'),
   },
   returns: v.null(),
   handler: async (context, args) => {
+    await requireQueueAdminAccess(context, args.apiKey)
+
     const item = await context.db.get(args.queueId)
     if (!item) return null
 
@@ -417,6 +435,7 @@ export const remove = mutation({
  */
 export const enqueueDiscoveries = mutation({
   args: {
+    apiKey: v.optional(v.string()),
     discoveries: v.array(
       v.object({
         type: v.union(v.literal('book'), v.literal('series'), v.literal('author')),
@@ -436,6 +455,8 @@ export const enqueueDiscoveries = mutation({
   },
   returns: v.number(), // Number of items actually queued
   handler: async (context, args) => {
+    await requireQueueAdminAccess(context, args.apiKey)
+
     let queued = 0
     const maxDiscoveries = SCRAPING_CONFIG.queue.maxDiscoveriesPerCall
 
@@ -616,6 +637,7 @@ export const queueExplicitRescrape = internalMutation({
   args: {
     entityType: v.union(v.literal('book'), v.literal('series'), v.literal('author')),
     url: v.string(),
+    bookId: v.optional(v.id('books')),
     displayName: v.optional(v.string()),
     displayImageUrl: v.optional(v.string()),
     skipSeriesLink: v.optional(v.boolean()),
@@ -631,6 +653,7 @@ export const queueExplicitRescrape = internalMutation({
 
 export const queueRescrape = mutation({
   args: {
+    apiKey: v.optional(v.string()),
     entityType: v.union(v.literal('book'), v.literal('series'), v.literal('author')),
     entityId: v.union(v.id('books'), v.id('series'), v.id('authors')),
     skipSeriesLink: v.optional(v.boolean()),
@@ -640,6 +663,8 @@ export const queueRescrape = mutation({
   },
   returns: v.id('scrapeQueue'),
   handler: async (context, args) => {
+    await requireQueueAdminAccess(context, args.apiKey)
+
     const entity = await context.db.get(args.entityId)
     if (!entity) throw new Error(`${args.entityType} not found`)
 
@@ -652,6 +677,7 @@ export const queueRescrape = mutation({
     const queueId = await queueExplicitRescrapeByUrl(context, {
       entityType: args.entityType,
       url,
+      bookId: args.entityType === 'book' ? (args.entityId as Id<'books'>) : undefined,
       displayName,
       displayImageUrl,
       skipSeriesLink: args.skipSeriesLink,
@@ -753,6 +779,7 @@ async function queueExplicitRescrapeByUrl(
   args: {
     entityType: 'book' | 'series' | 'author'
     url: string
+    bookId?: Id<'books'>
     displayName?: string
     displayImageUrl?: string
     skipSeriesLink?: boolean
@@ -787,6 +814,7 @@ async function queueExplicitRescrapeByUrl(
     source: 'user',
     referrerUrl: cleanedUrl,
     referrerReason: 'rescrape',
+    bookId: args.bookId,
     skipSeriesLink: args.skipSeriesLink,
     skipAuthorDiscovery: args.skipAuthorDiscovery,
     skipBookDiscoveries: args.skipBookDiscoveries,

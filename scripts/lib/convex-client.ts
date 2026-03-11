@@ -3,9 +3,10 @@ import { api } from '@/convex/_generated/api'
 import type { BookData } from '@/lib/scraping/domains/book/types'
 import type { BookReviewMetadata } from '@/lib/scraping/domains/book/review'
 import { FORMAT_PRIORITY, isAudioFormat } from '@/lib/scraping/domains/book/types'
+import type { Id } from '@/convex/_generated/dataModel'
 
 type ImportResult = {
-  bookId: string
+  bookId: Id<'books'>
   isNew: boolean
 }
 
@@ -16,6 +17,7 @@ export async function importBookToConvex(params: {
   skipCoverDownload?: boolean
   firstSeenFromUrl?: string
   firstSeenReason?: string
+  targetBookId?: Id<'books'>
 }): Promise<ImportResult> {
   const { scrapedData, amazonUrl, skipCoverDownload } = params
 
@@ -114,6 +116,7 @@ export async function importBookToConvex(params: {
     skipCoverDownload,
     firstSeenFromUrl: params.firstSeenFromUrl,
     firstSeenReason: params.firstSeenReason,
+    targetBookId: params.targetBookId,
   })
 
   console.log('✅ Book imported to Convex', { bookId: result.bookId, isNew: result.isNew })

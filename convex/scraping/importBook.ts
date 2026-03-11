@@ -149,6 +149,7 @@ export const importFromLocalScrape = action({
     skipCoverDownload: v.optional(v.boolean()),
     firstSeenFromUrl: v.optional(v.string()),
     firstSeenReason: v.optional(v.string()),
+    targetBookId: v.optional(v.id('books')),
   },
   handler: async (context, args): Promise<{ bookId: Id<'books'>; isNew: boolean }> => {
     requireScrapeImportKey(args.apiKey)
@@ -217,6 +218,7 @@ export const importFromLocalScrape = action({
       coverStatus: args.scrapedData.coverImageUrl ? 'pending' : 'error',
       firstSeenFromUrl: args.firstSeenFromUrl,
       firstSeenReason: args.firstSeenReason,
+      targetBookId: args.targetBookId,
     })
 
     const { bookId, isNew, coverSourceUrlChanged } = result

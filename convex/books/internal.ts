@@ -115,6 +115,7 @@ export const createOrUpdate = internalMutation({
     coverStatus: v.union(v.literal('pending'), v.literal('complete'), v.literal('error')),
     firstSeenFromUrl: v.optional(v.string()),
     firstSeenReason: v.optional(v.string()),
+    targetBookId: v.optional(v.id('books')),
   },
   returns: v.object({
     bookId: v.id('books'),
@@ -130,14 +131,22 @@ export const createOrUpdate = internalMutation({
       title: cleanedTitle,
       asin: args.asin ?? null,
       seriesId: args.seriesId ?? null,
+      targetBookId: args.targetBookId ?? null,
     })
+
+    if (args.targetBookId) {
+      const existingByAsin = args.asin ? await findExistingBookByAsin(context, args.asin) : null
+      if (existingByAsin && existingByAsin._id !== args.targetBookId) {
+        throw new Error(`Target book re-scrape conflicts with existing book ${existingByAsin._id} for ASIN ${args.asin}`)
+      }
+
+      const { coverSourceUrlChanged } = await updateExistingBook(context, args.targetBookId, args, cleanedTitle)
+      return { bookId: args.targetBookId, isNew: false, coverSourceUrlChanged }
+    }
 
     // Try to find existing book by ASIN (most reliable)
     if (args.asin) {
-      const existingByAsin = await context.db
-        .query('books')
-        .withIndex('by_asin', (q) => q.eq('asin', args.asin))
-        .unique()
+      const existingByAsin = await findExistingBookByAsin(context, args.asin)
 
       if (existingByAsin) {
         console.log('✅ Dedup matched by ASIN', {
@@ -443,6 +452,13 @@ async function findBookByTitleInSeriesWithLog(context: MutationCtx, title: strin
     }) ?? null
 
   return { match, checkedTitles }
+}
+
+async function findExistingBookByAsin(context: MutationCtx, asin: string) {
+  return await context.db
+    .query('books')
+    .withIndex('by_asin', (q) => q.eq('asin', asin))
+    .unique()
 }
 
 /**

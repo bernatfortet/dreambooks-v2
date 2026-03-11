@@ -36,6 +36,7 @@ export type QueueItem = {
   skipAuthorDiscovery?: boolean
   skipBookDiscoveries?: boolean
   skipCoverDownload?: boolean
+  bookId?: Id<'books'>
 }
 
 export async function fetchPendingQueueItems(limit: number = 5): Promise<QueueItem[]> {
@@ -153,7 +154,11 @@ export async function queueDiscoveries(
   referrerUrl?: string,
 ): Promise<number> {
   const client = getConvexClient()
-  return await client.mutation(api.scrapeQueue.mutations.enqueueDiscoveries, { discoveries, referrerUrl })
+  return await client.mutation(api.scrapeQueue.mutations.enqueueDiscoveries, {
+    apiKey: getScrapeImportKey(),
+    discoveries,
+    referrerUrl,
+  })
 }
 
 /**
@@ -175,10 +180,14 @@ export async function requeueAsType(params: {
   const original = await client.query(api.scrapeQueue.queries.get, { queueId: params.currentQueueId })
 
   // Remove the current item
-  await client.mutation(api.scrapeQueue.mutations.remove, { queueId: params.currentQueueId })
+  await client.mutation(api.scrapeQueue.mutations.remove, {
+    apiKey: getScrapeImportKey(),
+    queueId: params.currentQueueId,
+  })
 
   // Enqueue with the correct type, preserving provenance
   await client.mutation(api.scrapeQueue.mutations.enqueue, {
+    apiKey: getScrapeImportKey(),
     url: params.url,
     type: params.newType,
     priority: params.priority ?? 20, // Higher priority since we detected the correct type
@@ -263,7 +272,11 @@ export async function fetchSeriesNeedingUrlDiscovery(limit: number = 3): Promise
 
 export async function updateSeriesSourceUrl(seriesId: Id<'series'>, sourceUrl: string): Promise<void> {
   const client = getConvexClient()
-  await client.mutation(api.series.mutations.updateSourceUrl, { seriesId, sourceUrl })
+  await client.mutation(api.series.mutations.updateSourceUrl, {
+    apiKey: getScrapeImportKey(),
+    seriesId,
+    sourceUrl,
+  })
 }
 
 export async function saveSeriesFromScrape(
@@ -294,6 +307,7 @@ export async function saveSeriesFromScrape(
 ): Promise<void> {
   const client = getConvexClient()
   await client.mutation(api.series.mutations.saveFromCliScrape, {
+    apiKey: getScrapeImportKey(),
     seriesId,
     ...data,
   })
@@ -351,6 +365,7 @@ export async function queueEntityForRescrape(
 ): Promise<Id<'scrapeQueue'>> {
   const client = getConvexClient()
   return await client.mutation(api.scrapeQueue.mutations.queueRescrape, {
+    apiKey: getScrapeImportKey(),
     entityType,
     entityId,
   })

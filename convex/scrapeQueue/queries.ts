@@ -1,5 +1,6 @@
 import { query } from '../_generated/server'
 import { v } from 'convex/values'
+import { requireSuperadmin } from '../lib/superadmin'
 
 /**
  * Get pending items from the scrape queue, ordered by priority.
@@ -24,6 +25,7 @@ export const listPending = query({
       skipAuthorDiscovery: v.optional(v.boolean()),
       skipBookDiscoveries: v.optional(v.boolean()),
       skipCoverDownload: v.optional(v.boolean()),
+      bookId: v.optional(v.id('books')),
     }),
   ),
   handler: async (context, args) => {
@@ -49,6 +51,7 @@ export const listPending = query({
       skipAuthorDiscovery: item.skipAuthorDiscovery,
       skipBookDiscoveries: item.skipBookDiscoveries,
       skipCoverDownload: item.skipCoverDownload,
+      bookId: item.bookId,
     }))
   },
 })
@@ -61,6 +64,8 @@ export const list = query({
     limit: v.optional(v.number()),
   },
   handler: async (context, args) => {
+    await requireSuperadmin(context)
+
     const limit = args.limit ?? 50
 
     const items = await context.db.query('scrapeQueue').order('desc').take(limit)
@@ -86,6 +91,8 @@ export const get = query({
  */
 export const stats = query({
   handler: async (context) => {
+    await requireSuperadmin(context)
+
     const all = await context.db.query('scrapeQueue').collect()
 
     const pending = all.filter((i) => i.status === 'pending').length
