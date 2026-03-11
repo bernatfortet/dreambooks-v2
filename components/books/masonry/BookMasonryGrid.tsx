@@ -4,6 +4,7 @@ import { useRef, useLayoutEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { usePaginatedQuery } from 'convex/react'
 import { api } from '@/convex/_generated/api'
+import { getAwardTitleMarkerByResultType } from '@/components/awards/AwardResultMarker'
 import { useSuperadmin } from '@/components/auth/use-superadmin'
 import { PaginatedCollectionSection } from '@/components/collections/PaginatedCollectionSection'
 import { Id } from '@/convex/_generated/dataModel'
@@ -53,9 +54,10 @@ type MeasuredDimensions = {
 type BookMasonryListProps = {
   books: BookMasonryItem[]
   className?: string
+  showProfileActions?: boolean
 }
 
-export function BookMasonryList({ books, className }: BookMasonryListProps) {
+export function BookMasonryList({ books, className, showProfileActions = true }: BookMasonryListProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState<number | null>(null)
   const [measuredDimensionsById, setMeasuredDimensionsById] = useState<Record<string, MeasuredDimensions>>({})
@@ -134,6 +136,7 @@ export function BookMasonryList({ books, className }: BookMasonryListProps) {
             badge={book.badge}
             titleMarker={book.titleMarker}
             canManageBooks={isSuperadmin}
+            showProfileActions={showProfileActions}
             style={{
               position: 'absolute',
               top: `${position.y}px`,
@@ -172,6 +175,7 @@ type QueryBook = {
   slug?: string | null
   title: string
   authors: string[]
+  topAwardResultType?: 'winner' | 'honor' | null
   cover: {
     url: string | null
     urlThumb?: string | null
@@ -245,6 +249,7 @@ function transformToMasonryItem(book: QueryBook): BookMasonryItem {
     coverHeight: book.cover?.height ?? 300,
     dominantColor: book.cover?.dominantColor,
     seriesPosition: book.seriesPosition,
+    titleMarker: getAwardTitleMarkerByResultType(book.topAwardResultType),
   }
 }
 
