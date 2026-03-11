@@ -4,9 +4,15 @@ import { ConvexHttpClient } from 'convex/browser'
 import { api } from '@/convex/_generated/api'
 
 const convexUrl = process.env.CONVEX_URL
+const scrapeImportKey = process.env.SCRAPE_IMPORT_KEY
 
 if (!convexUrl) {
   console.error('❌ CONVEX_URL environment variable is not set')
+  process.exit(1)
+}
+
+if (!scrapeImportKey) {
+  console.error('❌ SCRAPE_IMPORT_KEY environment variable is not set')
   process.exit(1)
 }
 
@@ -17,7 +23,7 @@ console.log('')
 const client = new ConvexHttpClient(convexUrl)
 
 try {
-  const result = await client.action(api.admin.clearDatabase.clearAllExceptAwards, {})
+  const result = await client.action(api.admin.clearDatabase.clearAllExceptAwards, { apiKey: scrapeImportKey })
 
   console.log('')
   console.log('✅ Database clear complete!')

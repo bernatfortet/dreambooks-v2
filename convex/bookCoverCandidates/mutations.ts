@@ -2,6 +2,7 @@ import { internalMutation, mutation, type MutationCtx } from '../_generated/serv
 import { internal } from '../_generated/api'
 import type { Doc, Id } from '../_generated/dataModel'
 import { v } from 'convex/values'
+import { requireSuperadmin } from '../lib/superadmin'
 
 /**
  * Upsert a cover candidate.
@@ -69,6 +70,8 @@ export const selectCandidate = mutation({
     coverSourceUrl: v.string(),
   }),
   handler: async (context, args) => {
+    await requireSuperadmin(context)
+
     const candidate = await context.db.get(args.candidateId)
     if (!candidate) {
       throw new Error('Cover candidate not found')
@@ -111,6 +114,8 @@ export const markBad = mutation({
   },
   returns: v.null(),
   handler: async (context, args) => {
+    await requireSuperadmin(context)
+
     const candidate = await context.db.get(args.candidateId)
     if (!candidate) {
       throw new Error('Cover candidate not found')
@@ -146,6 +151,8 @@ export const selectCoverFromUrl = mutation({
     candidateId: v.id('bookCoverCandidates'),
   }),
   handler: async (context, args) => {
+    await requireSuperadmin(context)
+
     const book = await context.db.get(args.bookId)
     if (!book) {
       throw new Error('Book not found')

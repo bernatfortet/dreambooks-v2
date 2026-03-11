@@ -2,6 +2,7 @@ import { action } from '../_generated/server'
 import { internal } from '../_generated/api'
 import { v } from 'convex/values'
 import { Doc } from '../_generated/dataModel'
+import { requireSuperadmin } from '../lib/superadmin'
 
 /**
  * Force re-download cover from existing cover.sourceUrl.
@@ -14,6 +15,8 @@ export const forceDownloadCover = action({
     coverSourceUrl: v.string(),
   }),
   handler: async (context, args): Promise<{ scheduled: boolean; coverSourceUrl: string }> => {
+    await requireSuperadmin(context)
+
     console.log('🔄 Force re-downloading cover', { bookId: args.bookId })
 
     const book: Doc<'books'> | null = await context.runQuery(internal.books.queries.getInternal, { id: args.bookId })

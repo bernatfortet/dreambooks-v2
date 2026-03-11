@@ -41,7 +41,10 @@ export type QueueItem = {
 
 export async function fetchPendingQueueItems(limit: number = 5): Promise<QueueItem[]> {
   const client = getConvexClient()
-  const items = await client.query(api.scrapeQueue.queries.listPending, { limit })
+  const items = await client.query(api.scrapeQueue.queries.listPending, {
+    apiKey: getScrapeImportKey(),
+    limit,
+  })
   return items as QueueItem[]
 }
 
@@ -122,7 +125,10 @@ export async function markBookIntakeReadyToScrape(params: {
  */
 export async function markQueueItemProcessing(queueId: Id<'scrapeQueue'>): Promise<void> {
   const client = getConvexClient()
-  await client.mutation(api.scrapeQueue.mutations.markProcessing, { queueId })
+  await client.mutation(api.scrapeQueue.mutations.markProcessing, {
+    apiKey: getScrapeImportKey(),
+    queueId,
+  })
 }
 
 /**
@@ -131,7 +137,11 @@ export async function markQueueItemProcessing(queueId: Id<'scrapeQueue'>): Promi
  */
 export async function claimQueueItem(queueId: Id<'scrapeQueue'>, workerId: string): Promise<{ success: boolean; reason?: string }> {
   const client = getConvexClient()
-  return await client.mutation(api.scrapeQueue.mutations.claimItem, { queueId, workerId })
+  return await client.mutation(api.scrapeQueue.mutations.claimItem, {
+    apiKey: getScrapeImportKey(),
+    queueId,
+    workerId,
+  })
 }
 
 export async function markQueueItemComplete(params: {
@@ -141,12 +151,19 @@ export async function markQueueItemComplete(params: {
   authorId?: Id<'authors'>
 }): Promise<void> {
   const client = getConvexClient()
-  await client.mutation(api.scrapeQueue.mutations.markComplete, params)
+  await client.mutation(api.scrapeQueue.mutations.markComplete, {
+    apiKey: getScrapeImportKey(),
+    ...params,
+  })
 }
 
 export async function markQueueItemError(queueId: Id<'scrapeQueue'>, errorMessage: string): Promise<void> {
   const client = getConvexClient()
-  await client.mutation(api.scrapeQueue.mutations.markError, { queueId, errorMessage })
+  await client.mutation(api.scrapeQueue.mutations.markError, {
+    apiKey: getScrapeImportKey(),
+    queueId,
+    errorMessage,
+  })
 }
 
 export async function queueDiscoveries(
@@ -177,7 +194,10 @@ export async function requeueAsType(params: {
   const client = getConvexClient()
 
   // Get the original item to preserve provenance
-  const original = await client.query(api.scrapeQueue.queries.get, { queueId: params.currentQueueId })
+  const original = await client.query(api.scrapeQueue.queries.get, {
+    apiKey: getScrapeImportKey(),
+    queueId: params.currentQueueId,
+  })
 
   // Remove the current item
   await client.mutation(api.scrapeQueue.mutations.remove, {

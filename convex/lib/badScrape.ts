@@ -1,5 +1,6 @@
 import { mutation, query } from '../_generated/server'
 import { v } from 'convex/values'
+import { requireSuperadmin } from './superadmin'
 
 /**
  * Mark an entity as having bad scrape data.
@@ -13,6 +14,8 @@ export const markBadScrape = mutation({
   },
   returns: v.null(),
   handler: async (context, args) => {
+    await requireSuperadmin(context)
+
     await context.db.patch(args.entityId, {
       badScrape: true,
       badScrapeNotes: args.notes,
@@ -32,6 +35,8 @@ export const clearBadScrape = mutation({
   },
   returns: v.null(),
   handler: async (context, args) => {
+    await requireSuperadmin(context)
+
     await context.db.patch(args.entityId, {
       badScrape: false,
       badScrapeNotes: undefined,
@@ -48,6 +53,8 @@ export const clearBadScrape = mutation({
 export const listBadScrapes = query({
   args: {},
   handler: async (context) => {
+    await requireSuperadmin(context)
+
     const [books, seriesList, authors] = await Promise.all([
       context.db
         .query('books')

@@ -1,13 +1,14 @@
 'use client'
 
+import type { FunctionReturnType } from 'convex/server'
 import { use } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { useQuery } from 'convex/react'
 import { api } from '@/convex/_generated/api'
-import { isDev } from '@/lib/env'
+import { useSuperadmin } from '@/components/auth/use-superadmin'
 import { AuthorAdminPanel } from '@/components/authors/AuthorAdminPanel'
-import { BookGridList } from '@/components/books/BookGrid'
+import { BookMasonryList } from '@/components/books/masonry'
 import { DataDebugPanel } from '@/components/ui/DataDebugPanel'
 import { PageContainer } from '@/components/ui/PageContainer'
 
@@ -15,9 +16,12 @@ type AuthorPageProps = {
   params: Promise<{ slug: string }>
 }
 
+type AuthorData = NonNullable<FunctionReturnType<typeof api.authors.queries.getBySlugOrId>>
+
 export default function AuthorPage({ params }: AuthorPageProps) {
   const { slug } = use(params)
   const author = useQuery(api.authors.queries.getBySlugOrId, { slugOrId: slug })
+  const { isSuperadmin } = useSuperadmin()
 
   if (author === undefined) {
     return <AuthorDetailSkeleton />
@@ -36,19 +40,19 @@ export default function AuthorPage({ params }: AuthorPageProps) {
     <PageContainer>
       <BackToAuthorsLink />
 
-      <div className='flex flex-col md:flex-row gap-8'>
+      <div className='mb-8 flex flex-col gap-8 md:flex-row'>
         <AuthorImage imageUrl={author.imageUrlLarge ?? author.imageUrl} name={author.name} />
 
-        <div className='flex-1 space-y-4'>
+        <div className='flex-1'>
           <AuthorHeader name={author.name} bio={author.bio} bookCount={author.bookCount} />
-
-          {author.books.length > 0 && <AuthorBooks books={author.books} />}
         </div>
       </div>
 
-      {isDev() && <AuthorAdminPanel author={author} />}
+      {author.books.length > 0 ? <AuthorBooks books={author.books} /> : null}
 
-      <DataDebugPanel data={author} label='Author Data' />
+      {isSuperadmin ? <AuthorAdminPanel author={author} /> : null}
+
+      {isSuperadmin ? <DataDebugPanel data={author} label='Author Data' /> : null}
     </PageContainer>
   )
 }
@@ -95,22 +99,12 @@ function AuthorHeader({ name, bio, bookCount }: { name: string; bio: string | nu
   )
 }
 
-function AuthorBooks({
-  books,
-}: {
-  books: Array<{
-    _id: string
-    slug?: string | null
-    title: string
-    coverUrl: string | null
-    seriesPosition?: number | null
-  }>
-}) {
+function AuthorBooks({ books }: { books: AuthorData['books'] }) {
   return (
-    <div>
+    <section className='space-y-4'>
       <h2 className='font-semibold mb-4'>Books</h2>
-        <BookGridList books={books.map((book) => ({ ...book, authors: [] }))} />
-    </div>
+      <BookMasonryList books={books.map((book) => ({ ...book, authors: book.authors ?? [] }))} />
+    </section>
   )
 }
 
@@ -119,12 +113,25 @@ function AuthorDetailSkeleton() {
     <PageContainer>
       <div className='h-4 w-24 bg-muted rounded animate-pulse mb-6' />
 
-      <div className='flex flex-col md:flex-row gap-8'>
+      <div className='mb-8 flex flex-col gap-8 md:flex-row'>
         <div className='w-32 h-32 md:w-48 md:h-48 rounded-full bg-muted animate-pulse shrink-0' />
 
         <div className='flex-1 space-y-4'>
           <div className='h-8 bg-muted rounded animate-pulse w-1/3' />
           <div className='h-20 bg-muted rounded animate-pulse' />
+          <div className='h-4 bg-muted rounded animate-pulse w-24' />
+        </div>
+      </div>
+
+      <div className='space-y-4'>
+        <div className='h-6 bg-muted rounded animate-pulse w-20' />
+        <div className='grid grid-cols-2 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6'>
+          {Array.from({ length: 6 }).map((_, index) => (
+            <div key={index} className='space-y-2'>
+              <div className='aspect-2/3 bg-muted rounded-md animate-pulse' />
+              <div className='h-4 bg-muted rounded animate-pulse w-3/4' />
+            </div>
+          ))}
         </div>
       </div>
     </PageContainer>

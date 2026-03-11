@@ -25,6 +25,11 @@ if (!convexUrl) {
   throw new Error('CONVEX_URL environment variable is not set')
 }
 
+const scrapeImportKey = process.env.SCRAPE_IMPORT_KEY
+if (!scrapeImportKey) {
+  throw new Error('SCRAPE_IMPORT_KEY environment variable is not set')
+}
+
 const client = new ConvexHttpClient(convexUrl)
 
 // Known bad image URLs that should be cleared
@@ -168,6 +173,7 @@ async function main() {
       for (let i = 0; i < discoveries.length; i += batchSize) {
         const batch = discoveries.slice(i, i + batchSize)
         const queued = await client.mutation(api.scrapeQueue.mutations.enqueueDiscoveries, {
+            apiKey: scrapeImportKey,
           discoveries: batch,
         })
         totalQueued += queued

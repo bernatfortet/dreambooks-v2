@@ -3,7 +3,7 @@
 import { use } from 'react'
 import { useQuery } from 'convex/react'
 import { api } from '@/convex/_generated/api'
-import { isDev } from '@/lib/env'
+import { useSuperadmin } from '@/components/auth/use-superadmin'
 import { BookAdminPanel } from '@/components/books/BookAdminPanel'
 import { BookCover, isLandscapeCover } from '@/components/books/BookCover'
 import { BookDetails } from '@/components/books/BookDetails'
@@ -17,6 +17,7 @@ type BookPageProps = {
 export default function BookPage({ params }: BookPageProps) {
   const { slug } = use(params)
   const book = useQuery(api.books.queries.getBySlugOrId, { slugOrId: slug })
+  const { isSuperadmin } = useSuperadmin()
 
   if (book === undefined) return <BookPageSkeleton />
 
@@ -43,7 +44,7 @@ export default function BookPage({ params }: BookPageProps) {
         <BookDetails book={book} />
       </div>
 
-      {isDev() && <BookAdminPanel book={book} />}
+      {isSuperadmin ? <BookAdminPanel book={book} /> : null}
     </main>
   )
 }

@@ -14,6 +14,7 @@ import type { Id } from '@/convex/_generated/dataModel'
 import { scrapeSeries } from '@/lib/scraping/domains/series'
 
 const CONVEX_URL = process.env.CONVEX_URL || 'https://abundant-bee-200.convex.cloud'
+const SCRAPE_IMPORT_KEY = process.env.SCRAPE_IMPORT_KEY
 
 async function main() {
   const input = process.argv[2]
@@ -104,6 +105,7 @@ async function main() {
 
     try {
       const result = await client.mutation(api.series.mutations.saveFromCliScrape, {
+        apiKey: SCRAPE_IMPORT_KEY,
         seriesId,
         seriesName: data.name ?? 'Unknown Series',
         description: data.description ?? undefined,

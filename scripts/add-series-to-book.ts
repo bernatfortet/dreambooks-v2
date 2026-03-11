@@ -15,6 +15,7 @@ import { withBrowser } from '@/lib/scraping/providers/playwright/browser'
 import { navigateWithRetry } from '@/lib/scraping/providers/playwright/browser'
 
 const CONVEX_URL = process.env.CONVEX_URL || 'https://abundant-bee-200.convex.cloud'
+const SCRAPE_IMPORT_KEY = process.env.SCRAPE_IMPORT_KEY
 
 async function main() {
   const bookId = process.argv[2]
@@ -87,6 +88,7 @@ async function main() {
     // Get or create the series (this will also link the book if createFromBook is used)
     // But first, let's create/upsert the series
     const seriesId = await client.mutation(api.series.mutations.upsertFromUrl, {
+      apiKey: SCRAPE_IMPORT_KEY,
       name: seriesName,
       sourceUrl: normalizedSeriesUrl,
       description: description ?? undefined,
@@ -97,6 +99,7 @@ async function main() {
 
     // Link book to series
     await client.mutation(api.series.mutations.linkBookToSeries, {
+      apiKey: SCRAPE_IMPORT_KEY,
       bookId: bookId as any,
       seriesId: seriesId as any,
       seriesPosition: undefined,

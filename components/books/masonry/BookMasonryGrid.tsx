@@ -2,8 +2,9 @@
 
 import { useRef, useLayoutEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { usePaginatedQuery, useQuery } from 'convex/react'
+import { usePaginatedQuery } from 'convex/react'
 import { api } from '@/convex/_generated/api'
+import { useSuperadmin } from '@/components/auth/use-superadmin'
 import { PaginatedCollectionSection } from '@/components/collections/PaginatedCollectionSection'
 import { Id } from '@/convex/_generated/dataModel'
 import type { BookFilters } from '../filters/types'
@@ -58,8 +59,7 @@ export function BookMasonryList({ books, className }: BookMasonryListProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState<number | null>(null)
   const [measuredDimensionsById, setMeasuredDimensionsById] = useState<Record<string, MeasuredDimensions>>({})
-  const viewer = useQuery(api.users.queries.viewer)
-  const canManageBooks = viewer?.isSuperadmin === true
+  const { isSuperadmin } = useSuperadmin()
 
   useLayoutEffect(() => {
     const container = containerRef.current
@@ -133,7 +133,7 @@ export function BookMasonryList({ books, className }: BookMasonryListProps) {
             seriesPosition={book.seriesPosition}
             badge={book.badge}
             titleMarker={book.titleMarker}
-            canManageBooks={canManageBooks}
+            canManageBooks={isSuperadmin}
             style={{
               position: 'absolute',
               top: `${position.y}px`,

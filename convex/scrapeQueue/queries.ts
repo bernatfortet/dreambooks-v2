@@ -1,12 +1,24 @@
 import { query } from '../_generated/server'
+import type { QueryCtx } from '../_generated/server'
 import { v } from 'convex/values'
+import { requireScrapeImportKey } from '../lib/scrapeImportAuth'
 import { requireSuperadmin } from '../lib/superadmin'
+
+async function requireQueueReadAccess(context: QueryCtx, apiKey: string | undefined) {
+  if (apiKey) {
+    requireScrapeImportKey(apiKey)
+    return
+  }
+
+  await requireSuperadmin(context)
+}
 
 /**
  * Get pending items from the scrape queue, ordered by priority.
  */
 export const listPending = query({
   args: {
+    apiKey: v.optional(v.string()),
     limit: v.optional(v.number()),
   },
   returns: v.array(
@@ -29,6 +41,8 @@ export const listPending = query({
     }),
   ),
   handler: async (context, args) => {
+    await requireQueueReadAccess(context, args.apiKey)
+
     const limit = args.limit ?? 10
 
     const items = await context.db
@@ -79,9 +93,12 @@ export const list = query({
  */
 export const get = query({
   args: {
+    apiKey: v.optional(v.string()),
     queueId: v.id('scrapeQueue'),
   },
   handler: async (context, args) => {
+    await requireQueueReadAccess(context, args.apiKey)
+
     return await context.db.get(args.queueId)
   },
 })

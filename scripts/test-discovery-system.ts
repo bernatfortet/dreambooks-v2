@@ -230,7 +230,10 @@ async function testQueueIntegration() {
 
   // Test 2.3: Source Field
   console.log('Test 2.3: Source Field')
-  const userItem = await client.query(api.scrapeQueue.queries.listPending, { limit: 1 })
+  const userItem = await client.query(api.scrapeQueue.queries.listPending, {
+    apiKey: scrapeImportKey,
+    limit: 1,
+  })
   if (userItem.length > 0 && userItem[0].source !== 'user') {
     console.error(`   ❌ FAILED: User item has wrong source: ${userItem[0].source}`)
     return false
@@ -238,7 +241,10 @@ async function testQueueIntegration() {
 
   // Check discovery items
   const discoveryItems = await client
-    .query(api.scrapeQueue.queries.listPending, { limit: 10 })
+    .query(api.scrapeQueue.queries.listPending, {
+      apiKey: scrapeImportKey,
+      limit: 10,
+    })
     .then((items) => items.filter((item) => item.source === 'discovery'))
 
   if (discoveryItems.length > 0) {

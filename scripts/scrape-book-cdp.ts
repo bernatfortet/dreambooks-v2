@@ -29,6 +29,8 @@ import type { Id } from '@/convex/_generated/dataModel'
 dotenv.config({ path: '.env.local' })
 dotenv.config()
 
+const scrapeImportKey = process.env.SCRAPE_IMPORT_KEY
+
 const CDP_URL = 'http://localhost:9222'
 
 // --- Human-like delay utilities ---
@@ -354,6 +356,7 @@ async function saveSeriesMetadata(params: {
 
     // Get or create series (upsertFromUrl handles description and coverImageUrl)
     const seriesId = await client.mutation(api.series.mutations.upsertFromUrl, {
+      apiKey: scrapeImportKey,
       name: seriesName,
       sourceUrl: seriesUrl,
       description: description ?? undefined,
@@ -362,6 +365,7 @@ async function saveSeriesMetadata(params: {
 
     // Link the original book to the series
     await client.mutation(api.series.mutations.linkBookToSeries, {
+      apiKey: scrapeImportKey,
       bookId: bookId as Id<'books'>,
       seriesId,
     })
@@ -384,6 +388,7 @@ async function linkBookToSeries(bookId: string, seriesId: Id<'series'>, position
     const client = new ConvexHttpClient(convexUrl)
 
     await client.mutation(api.series.mutations.linkBookToSeries, {
+      apiKey: scrapeImportKey,
       bookId: bookId as Id<'books'>,
       seriesId,
       seriesPosition: position ?? undefined,

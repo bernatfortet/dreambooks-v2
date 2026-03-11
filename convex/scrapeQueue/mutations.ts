@@ -245,10 +245,13 @@ export const enqueue = mutation({
  */
 export const markProcessing = mutation({
   args: {
+    apiKey: v.optional(v.string()),
     queueId: v.id('scrapeQueue'),
   },
   returns: v.null(),
   handler: async (context, args) => {
+    await requireQueueAdminAccess(context, args.apiKey)
+
     await context.db.patch(args.queueId, {
       status: 'processing',
       startedAt: Date.now(),
@@ -264,6 +267,7 @@ export const markProcessing = mutation({
  */
 export const claimItem = mutation({
   args: {
+    apiKey: v.optional(v.string()),
     queueId: v.id('scrapeQueue'),
     workerId: v.string(),
   },
@@ -272,6 +276,8 @@ export const claimItem = mutation({
     reason: v.optional(v.string()),
   }),
   handler: async (context, args) => {
+    await requireQueueAdminAccess(context, args.apiKey)
+
     const item = await context.db.get(args.queueId)
     if (!item) {
       return { success: false, reason: 'not_found' }
@@ -307,6 +313,7 @@ export const claimItem = mutation({
  */
 export const markComplete = mutation({
   args: {
+    apiKey: v.optional(v.string()),
     queueId: v.id('scrapeQueue'),
     bookId: v.optional(v.id('books')),
     seriesId: v.optional(v.id('series')),
@@ -314,6 +321,8 @@ export const markComplete = mutation({
   },
   returns: v.null(),
   handler: async (context, args) => {
+    await requireQueueAdminAccess(context, args.apiKey)
+
     const queueItem = await context.db.get(args.queueId)
     if (!queueItem) return null
 
@@ -342,11 +351,14 @@ export const markComplete = mutation({
  */
 export const markError = mutation({
   args: {
+    apiKey: v.optional(v.string()),
     queueId: v.id('scrapeQueue'),
     errorMessage: v.string(),
   },
   returns: v.null(),
   handler: async (context, args) => {
+    await requireQueueAdminAccess(context, args.apiKey)
+
     const queueItem = await context.db.get(args.queueId)
     if (!queueItem) return null
 

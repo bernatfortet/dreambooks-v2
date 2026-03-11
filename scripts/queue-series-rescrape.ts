@@ -15,6 +15,11 @@ if (!CONVEX_URL) {
   throw new Error('CONVEX_URL environment variable is not set')
 }
 
+const SCRAPE_IMPORT_KEY = process.env.SCRAPE_IMPORT_KEY
+if (!SCRAPE_IMPORT_KEY) {
+  throw new Error('SCRAPE_IMPORT_KEY environment variable is not set')
+}
+
 const client = new ConvexHttpClient(CONVEX_URL)
 
 async function main() {
@@ -48,6 +53,7 @@ async function main() {
 
     try {
       await client.mutation(api.scrapeQueue.mutations.queueRescrape, {
+        apiKey: SCRAPE_IMPORT_KEY,
         entityType: 'series',
         entityId: series._id,
         skipBookDiscoveries: true,

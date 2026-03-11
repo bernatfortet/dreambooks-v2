@@ -1,8 +1,25 @@
 import { action, internalMutation, internalQuery } from '../_generated/server'
+import type { ActionCtx } from '../_generated/server'
 import { internal } from '../_generated/api'
 import { v } from 'convex/values'
+import { requireScrapeImportKey } from '../lib/scrapeImportAuth'
+import { requireSuperadmin } from '../lib/superadmin'
 
 const BATCH_SIZE = 50
+
+async function requireClearDatabaseAccess(params: {
+  context: ActionCtx
+  apiKey: string | undefined
+}) {
+  const { context, apiKey } = params
+
+  if (apiKey) {
+    requireScrapeImportKey(apiKey)
+    return
+  }
+
+  await requireSuperadmin(context)
+}
 
 /**
  * Internal query to get all storage IDs from books (cover.storageId*).
@@ -154,6 +171,9 @@ export const getAllIds = internalQuery({
  * Uses batched deletions to avoid timeouts.
  */
 export const clearAllExceptAwards = action({
+  args: {
+    apiKey: v.optional(v.string()),
+  },
   returns: v.object({
     deleted: v.object({
       bookAwards: v.number(),
@@ -170,7 +190,9 @@ export const clearAllExceptAwards = action({
       authorImages: v.number(),
     }),
   }),
-  handler: async (context) => {
+  handler: async (context, args) => {
+    await requireClearDatabaseAccess({ context, apiKey: args.apiKey })
+
     const deleted: Record<string, number> = {
       bookAwards: 0,
       bookAuthors: 0,
@@ -272,6 +294,9 @@ export const clearAllExceptAwards = action({
  * This includes images from books, series, authors, and awards.
  */
 export const deleteAllStorageFiles = action({
+  args: {
+    apiKey: v.optional(v.string()),
+  },
   returns: v.object({
     deleted: v.object({
       bookCovers: v.number(),
@@ -281,7 +306,9 @@ export const deleteAllStorageFiles = action({
       total: v.number(),
     }),
   }),
-  handler: async (context) => {
+  handler: async (context, args) => {
+    await requireClearDatabaseAccess({ context, apiKey: args.apiKey })
+
     const deleted = {
       bookCovers: 0,
       seriesCovers: 0,

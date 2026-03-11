@@ -22,6 +22,11 @@ import { SCRAPING_CONFIG } from '@/lib/scraping/config'
 dotenv.config({ path: '.env.local' })
 dotenv.config()
 
+const scrapeImportKey = process.env.SCRAPE_IMPORT_KEY
+if (!scrapeImportKey) {
+  throw new Error('SCRAPE_IMPORT_KEY environment variable is not set')
+}
+
 async function main() {
   const convexUrl = process.env.CONVEX_URL
   if (!convexUrl) {
@@ -127,6 +132,7 @@ async function main() {
     for (let i = 0; i < discoveries.length; i += batchSize) {
       const batch = discoveries.slice(i, i + batchSize)
       const queued = await client.mutation(api.scrapeQueue.mutations.enqueueDiscoveries, {
+        apiKey: scrapeImportKey,
         discoveries: batch,
       })
       totalQueued += queued

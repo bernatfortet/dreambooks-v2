@@ -16,6 +16,8 @@ import {
 } from '../convex'
 import { api } from '@/convex/_generated/api'
 
+const SCRAPE_IMPORT_KEY = process.env.SCRAPE_IMPORT_KEY
+
 type ProcessSeriesResult = {
   success: boolean
   seriesId?: string
@@ -177,6 +179,7 @@ async function processSeriesAttempt(
       seriesId =
         existingSeriesId ??
         (await client.mutation(api.series.mutations.upsertFromUrl, {
+          apiKey: SCRAPE_IMPORT_KEY,
           name: seriesData.name,
           sourceUrl: item.url,
           description: seriesData.description ?? undefined,

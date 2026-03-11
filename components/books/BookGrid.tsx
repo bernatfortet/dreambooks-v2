@@ -1,8 +1,7 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { useQuery } from 'convex/react'
-import { api } from '@/convex/_generated/api'
+import { useSuperadmin } from '@/components/auth/use-superadmin'
 import { BookMasonryCard } from '@/components/books/masonry/BookMasonryCard'
 import { BookMasonryGrid, type BookMasonryItem } from '@/components/books/masonry'
 import type { Id } from '@/convex/_generated/dataModel'
@@ -45,8 +44,7 @@ type BookGridListProps = {
 }
 
 export function BookGridList({ books, className }: BookGridListProps) {
-  const viewer = useQuery(api.users.queries.viewer)
-  const canManageBooks = viewer?.isSuperadmin === true
+  const { isSuperadmin } = useSuperadmin()
 
   return (
     <BookGridContainer className={className}>
@@ -69,7 +67,7 @@ export function BookGridList({ books, className }: BookGridListProps) {
             seriesPosition={normalizedBook.seriesPosition}
             badge={normalizedBook.badge}
             titleMarker={normalizedBook.titleMarker}
-            canManageBooks={canManageBooks}
+            canManageBooks={isSuperadmin}
             style={{}}
             imageHeight={0}
             imageAspectRatio={coverAspectRatio}

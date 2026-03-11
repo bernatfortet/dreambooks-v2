@@ -25,9 +25,15 @@ import type {
 import { importBookToConvex } from '../lib/convex-client'
 import { getAwardArtifactPath, readJsonFile, writeJsonFile } from './lib/io'
 import { caldecottPdfParser } from './parsers/caldecott'
+import { newberyPdfParser } from './parsers/newbery'
 
 dotenv.config({ path: '.env.local' })
 dotenv.config()
+
+const scrapeImportKey = process.env.SCRAPE_IMPORT_KEY
+if (!scrapeImportKey) {
+  throw new Error('SCRAPE_IMPORT_KEY environment variable is not set')
+}
 
 type CliCommand = 'extract' | 'enqueue' | 'resolve' | 'import' | 'link' | 'report' | 'run'
 
@@ -230,6 +236,7 @@ async function runImportStage(options: CliOptions) {
       }
 
       const enqueueResult = await client.mutation(api.scrapeQueue.mutations.enqueue, {
+        apiKey: scrapeImportKey,
         url: resolution.amazon.amazonUrl,
         type: 'book',
         displayName: resolution.entry.title,
@@ -553,7 +560,7 @@ function parseArgs(args: string[]): CliOptions {
   }
 
   const award = options.get('--award') ?? 'caldecott'
-  const sourcePath = options.get('--source') ?? `${process.cwd()}/tmp/caldecott-medal-honors-to-present.pdf`
+  const sourcePath = options.get('--source') ?? getDefaultSourcePathForAward(award)
   const extractedPath = options.get('--extracted') ?? getAwardArtifactPath({ awardSlug: award, artifactName: 'extracted' })
   const resolvedPath = options.get('--resolved') ?? getAwardArtifactPath({ awardSlug: award, artifactName: 'resolved' })
   const importedPath = options.get('--imported') ?? getAwardArtifactPath({ awardSlug: award, artifactName: 'imported' })
@@ -594,6 +601,13 @@ function createConvexClient() {
 
 function getParser(award: string): AwardSourceParser {
   if (award === 'caldecott') return caldecottPdfParser
+  if (award === 'newbery') return newberyPdfParser
+  throw new Error(`Unsupported award source: ${award}`)
+}
+
+function getDefaultSourcePathForAward(award: string): string {
+  if (award === 'caldecott') return `${process.cwd()}/tmp/caldecott-medal-honors-to-present.pdf`
+  if (award === 'newbery') return `${process.cwd()}/tmp/newbery-medals-honors-1922-present.pdf`
   throw new Error(`Unsupported award source: ${award}`)
 }
 

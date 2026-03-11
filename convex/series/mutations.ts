@@ -5,9 +5,11 @@ import { v } from 'convex/values'
 import { extractSeriesId, normalizeAmazonUrl } from '../scraping/adapters/amazon/url'
 import { Doc } from '../_generated/dataModel'
 import { internal } from '../_generated/api'
+import { requireScrapeImportKey } from '../lib/scrapeImportAuth'
 import { SCRAPE_VERSIONS } from '../lib/scrapeVersions'
 import { generateUniqueSlug, generateUniqueBookSlug } from '../lib/slug'
 import { deleteScrapeArtifacts, clearScrapeQueueReferences, deleteStorageFile } from '../lib/deleteHelpers'
+import { requireSuperadmin } from '../lib/superadmin'
 import { DEFAULT_LOCAL_SCRAPE_SOURCE, LOCAL_SCRAPE_SOURCES } from '@/lib/scraping/local-source'
 
 // Type for book entry in series scrape
@@ -18,6 +20,15 @@ type SeriesBookEntry = {
   position?: number
   coverImageUrl?: string
   authors?: string[]
+}
+
+async function requireSeriesAdminAccess(context: MutationCtx, apiKey: string | undefined) {
+  if (apiKey) {
+    requireScrapeImportKey(apiKey)
+    return
+  }
+
+  await requireSuperadmin(context)
 }
 
 const localScrapeSourceValidator = v.union(
@@ -404,11 +415,14 @@ export const markError = mutation({
  */
 export const updateSourceUrl = mutation({
   args: {
+    apiKey: v.optional(v.string()),
     seriesId: v.id('series'),
     sourceUrl: v.string(),
   },
   returns: v.null(),
   handler: async (context, args) => {
+    await requireSeriesAdminAccess(context, args.apiKey)
+
     const series = await context.db.get(args.seriesId)
 
     if (!series) {
@@ -443,6 +457,8 @@ export const createFromBook = mutation({
   },
   returns: v.id('series'),
   handler: async (context, args) => {
+    await requireSuperadmin(context)
+
     const book = await context.db.get(args.bookId)
 
     if (!book) {
@@ -521,6 +537,7 @@ export const createFromBook = mutation({
  */
 export const upsertFromUrl = mutation({
   args: {
+    apiKey: v.optional(v.string()),
     name: v.string(),
     sourceUrl: v.string(),
     description: v.optional(v.string()),
@@ -531,6 +548,8 @@ export const upsertFromUrl = mutation({
   },
   returns: v.id('series'),
   handler: async (context, args) => {
+    await requireSeriesAdminAccess(context, args.apiKey)
+
     const normalizedName = requireValidSeriesName(args.name)
 
     const sourceId = extractSeriesId(args.sourceUrl) ?? undefined
@@ -709,12 +728,15 @@ export const updateSourceUrlAndCover = mutation({
  */
 export const linkBookToSeries = mutation({
   args: {
+    apiKey: v.optional(v.string()),
     bookId: v.id('books'),
     seriesId: v.id('series'),
     seriesPosition: v.optional(v.number()),
   },
   returns: v.null(),
   handler: async (context, args) => {
+    await requireSeriesAdminAccess(context, args.apiKey)
+
     const book = await context.db.get(args.bookId)
     if (!book) {
       throw new Error('Book not found')
@@ -750,6 +772,7 @@ export const linkBookToSeries = mutation({
  */
 export const saveFromCliScrape = mutation({
   args: {
+    apiKey: v.optional(v.string()),
     seriesId: v.id('series'),
     seriesName: v.string(),
     sourceUrl: v.optional(v.string()),
@@ -785,6 +808,8 @@ export const saveFromCliScrape = mutation({
     hasMorePages: v.boolean(),
   }),
   handler: async (context, args) => {
+    await requireSeriesAdminAccess(context, args.apiKey)
+
     const scrapeSource = args.scrapeSource ?? DEFAULT_LOCAL_SCRAPE_SOURCE
 
     console.log('💾 Saving CLI scrape results', { seriesId: args.seriesId, books: args.books.length })
@@ -1147,6 +1172,8 @@ export const deleteSeries = mutation({
   },
   returns: v.null(),
   handler: async (context, args) => {
+    await requireSuperadmin(context)
+
     const series = await context.db.get(args.seriesId)
 
     if (!series) {

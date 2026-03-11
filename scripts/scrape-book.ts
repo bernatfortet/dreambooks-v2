@@ -29,6 +29,8 @@ import type { Id } from '@/convex/_generated/dataModel'
 dotenv.config({ path: '.env.local' })
 dotenv.config()
 
+const scrapeImportKey = process.env.SCRAPE_IMPORT_KEY
+
 type CliArgs = {
   url: string
   dryRun: boolean
@@ -160,6 +162,7 @@ async function scrapeSeriesFromBook(params: { seriesUrl: string; seriesName: str
   if (!seriesId) {
     // Series should have been created during import, but if not, create it now
     seriesId = await client.mutation(api.series.mutations.upsertFromUrl, {
+      apiKey: scrapeImportKey,
       name: seriesName,
       sourceUrl: seriesUrl,
     })
@@ -167,6 +170,7 @@ async function scrapeSeriesFromBook(params: { seriesUrl: string; seriesName: str
     // Link book to series if not already linked
     if (!book.seriesId) {
       await client.mutation(api.series.mutations.linkBookToSeries, {
+        apiKey: scrapeImportKey,
         bookId: bookId as Id<'books'>,
         seriesId,
       })
@@ -205,6 +209,7 @@ async function scrapeSeriesFromBook(params: { seriesUrl: string; seriesName: str
   console.log('💾 Saving to Convex via mutation...')
 
   const saveResult = await client.mutation(api.series.mutations.saveFromCliScrape, {
+    apiKey: scrapeImportKey,
     seriesId,
     seriesName: data.name ?? 'Unknown Series',
     description: data.description ?? undefined,

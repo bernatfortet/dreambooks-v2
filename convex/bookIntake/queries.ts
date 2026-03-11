@@ -2,6 +2,7 @@ import { query } from '../_generated/server'
 import { v } from 'convex/values'
 import type { QueryCtx } from '../_generated/server'
 import type { Doc } from '../_generated/dataModel'
+import { requireSuperadmin } from '../lib/superadmin'
 
 type IntakeStatus = Doc<'bookIntake'>['status']
 
@@ -41,6 +42,8 @@ export const stats = query({
     total: v.number(),
   }),
   handler: async (context) => {
+    await requireSuperadmin(context)
+
     const items = await context.db.query('bookIntake').collect()
     const counts = countStatuses(items)
     return counts
@@ -89,6 +92,8 @@ export const listQueue = query({
     }),
   ),
   handler: async (context, args) => {
+    await requireSuperadmin(context)
+
     const selectedStatuses = getSelectedStatuses(args.statuses)
     const limit = resolveLimit(args.limit, DEFAULT_QUEUE_LIMIT)
     const items = await loadQueueItems(context, {
@@ -121,6 +126,8 @@ export const listNeedsReview = query({
     }),
   ),
   handler: async (context, args) => {
+    await requireSuperadmin(context)
+
     const limit = resolveLimit(args.limit, DEFAULT_REVIEW_LIMIT)
     const items = await loadItemsByStatus(context, {
       status: 'needs_review',

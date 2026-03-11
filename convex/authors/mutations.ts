@@ -3,6 +3,7 @@ import { v } from 'convex/values'
 import type { Doc, Id } from '../_generated/dataModel'
 import { generateUniqueSlug } from '../lib/slug'
 import { deleteScrapeArtifacts, clearScrapeQueueReferences, deleteStorageFile } from '../lib/deleteHelpers'
+import { requireSuperadmin } from '../lib/superadmin'
 
 /**
  * Upsert an author from scrape data.
@@ -181,6 +182,8 @@ export const deleteAuthor = mutation({
   },
   returns: v.null(),
   handler: async (context, args) => {
+    await requireSuperadmin(context)
+
     const author = await context.db.get(args.authorId)
 
     if (!author) {

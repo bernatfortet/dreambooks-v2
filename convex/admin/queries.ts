@@ -1,6 +1,7 @@
 import { query } from '../_generated/server'
 import { v } from 'convex/values'
 import { isBookVisibleForDiscovery } from '../lib/bookVisibility'
+import { requireSuperadmin } from '../lib/superadmin'
 
 /**
  * Get database statistics for admin dashboard.
@@ -12,6 +13,8 @@ export const stats = query({
     authors: v.number(),
   }),
   handler: async (context) => {
+    await requireSuperadmin(context)
+
     const books = await context.db.query('books').collect()
     const series = await context.db.query('series').collect()
     const authors = await context.db.query('authors').collect()
@@ -36,6 +39,8 @@ export const listBooksNeedingReview = query({
     }),
   ),
   handler: async (context) => {
+    await requireSuperadmin(context)
+
     const books = await context.db
       .query('books')
       .withIndex('by_needsReview', (q) => q.eq('needsReview', true))

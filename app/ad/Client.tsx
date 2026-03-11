@@ -6,20 +6,29 @@ import { BooksNeedingReviewSection } from '@/components/admin/BooksNeedingReview
 import { BookSubmitForm } from '@/components/books/BookSubmitForm'
 import { QueueList } from '@/components/scrape-queue/QueueList'
 import { Badge } from '@/components/ui/badge'
+import { useSuperadmin } from '@/components/auth/use-superadmin'
 import { api } from '@/convex/_generated/api'
-import { isDev } from '@/lib/env'
 import { useQuery } from 'convex/react'
 import { useState } from 'react'
 
 export default function AdminPage() {
-  const [bookUrl, setBookUrl] = useState('')
-  const queueStats = useQuery(api.scrapeQueue.queries.stats)
-  const dbStats = useQuery(api.admin.queries.stats)
+  const [queueUrl, setQueueUrl] = useState('')
+  const { isLoading, isSuperadmin } = useSuperadmin()
+  const queueStats = useQuery(api.scrapeQueue.queries.stats, isSuperadmin ? {} : 'skip')
+  const dbStats = useQuery(api.admin.queries.stats, isSuperadmin ? {} : 'skip')
 
-  if (!isDev()) {
+  if (isLoading) {
     return (
       <main className='container mx-auto py-8 px-4'>
-        <p className='text-muted-foreground'>Admin dashboard is only available in development.</p>
+        <p className='text-muted-foreground'>Loading admin access...</p>
+      </main>
+    )
+  }
+
+  if (!isSuperadmin) {
+    return (
+      <main className='container mx-auto py-8 px-4'>
+        <p className='text-muted-foreground'>This admin dashboard is only available to superusers.</p>
       </main>
     )
   }
@@ -39,7 +48,7 @@ export default function AdminPage() {
 
       <section className='mb-8'>
         <div className='flex items-center justify-between mb-4'>
-          <h2 className='text-xl font-semibold'>Add a Book or Series</h2>
+          <h2 className='text-xl font-semibold'>Add a Book, Series, or Author</h2>
           {queueStats && (
             <div className='flex gap-2 text-sm'>
               <Badge variant='secondary'>{queueStats.pending} pending</Badge>
@@ -48,7 +57,7 @@ export default function AdminPage() {
           )}
         </div>
 
-        <BookSubmitForm url={bookUrl} onUrlChange={setBookUrl} />
+        <BookSubmitForm url={queueUrl} onUrlChange={setQueueUrl} />
       </section>
 
       <section className='mb-8'>

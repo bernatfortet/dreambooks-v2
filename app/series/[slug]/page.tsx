@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useQuery } from 'convex/react'
 import { api } from '@/convex/_generated/api'
 import { BookCardBadge } from '@/components/books/BookCard'
-import { isDev } from '@/lib/env'
+import { useSuperadmin } from '@/components/auth/use-superadmin'
 import { SeriesAdminPanel } from '@/components/series/SeriesAdminPanel'
 import { DataDebugPanel } from '@/components/ui/DataDebugPanel'
 import { BookGridList, BookGridSkeleton } from '@/components/books/BookGrid'
@@ -18,6 +18,7 @@ type SeriesPageProps = {
 export default function SeriesPage({ params }: SeriesPageProps) {
   const { slug } = use(params)
   const series = useQuery(api.series.queries.getWithBooksBySlugOrId, { slugOrId: slug })
+  const { isSuperadmin } = useSuperadmin()
 
   if (series === undefined) {
     return <SeriesDetailSkeleton />
@@ -58,9 +59,9 @@ export default function SeriesPage({ params }: SeriesPageProps) {
         <BookGridList books={booksWithOrderBadges} />
       )}
 
-      {isDev() && series && <SeriesAdminPanel seriesId={series._id} />}
+      {isSuperadmin ? <SeriesAdminPanel seriesId={series._id} /> : null}
 
-      <DataDebugPanel data={series} label='Series Data' />
+      {isSuperadmin ? <DataDebugPanel data={series} label='Series Data' /> : null}
     </PageContainer>
   )
 }
