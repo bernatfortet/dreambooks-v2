@@ -4,6 +4,7 @@ import { use } from 'react'
 import Link from 'next/link'
 import { useQuery } from 'convex/react'
 import { api } from '@/convex/_generated/api'
+import { BookCardBadge } from '@/components/books/BookCard'
 import { isDev } from '@/lib/env'
 import { SeriesAdminPanel } from '@/components/series/SeriesAdminPanel'
 import { DataDebugPanel } from '@/components/ui/DataDebugPanel'
@@ -33,6 +34,8 @@ export default function SeriesPage({ params }: SeriesPageProps) {
     )
   }
 
+  const booksWithOrderBadges = buildBooksWithOrderBadges(series.books)
+
   return (
     <PageContainer>
       <Link href='/' className='text-sm text-muted-foreground hover:underline mb-6 block'>
@@ -52,7 +55,7 @@ export default function SeriesPage({ params }: SeriesPageProps) {
       {series.books.length === 0 ? (
         <p className='text-muted-foreground'>No books in this series yet.</p>
       ) : (
-        <BookGridList books={series.books} />
+        <BookGridList books={booksWithOrderBadges} />
       )}
 
       {isDev() && series && <SeriesAdminPanel seriesId={series._id} />}
@@ -60,6 +63,21 @@ export default function SeriesPage({ params }: SeriesPageProps) {
       <DataDebugPanel data={series} label='Series Data' />
     </PageContainer>
   )
+}
+
+function buildBooksWithOrderBadges<
+  TBook extends {
+    seriesPosition?: number | null
+  },
+>(books: TBook[]) {
+  return books.map((book, index) => {
+    const orderNumber = book.seriesPosition ?? index + 1
+
+    return {
+      ...book,
+      badge: <BookCardBadge>#{orderNumber}</BookCardBadge>,
+    }
+  })
 }
 
 function SeriesDetailSkeleton() {
