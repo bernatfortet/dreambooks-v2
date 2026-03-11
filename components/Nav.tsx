@@ -115,7 +115,7 @@ function MobileNav({ isActive }: { isActive: (path: string) => boolean }) {
 function isPathActive(pathname: string | null, path: string) {
   if (path === '/') return pathname === '/'
 
-  return pathname?.startsWith(path)
+  return pathname?.startsWith(path) ?? false
 }
 
 function getMobileNavLinkClassName(isActive: boolean) {

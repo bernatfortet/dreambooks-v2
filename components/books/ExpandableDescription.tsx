@@ -17,7 +17,10 @@ export function ExpandableDescription({ description }: ExpandableDescriptionProp
     if (!measurementElement) return
 
     function updateOverflow() {
-      const computedStyles = window.getComputedStyle(measurementElement)
+      const currentMeasurementElement = measurementRef.current
+      if (!currentMeasurementElement) return
+
+      const computedStyles = window.getComputedStyle(currentMeasurementElement)
       const lineHeight = Number.parseFloat(computedStyles.lineHeight)
 
       if (!Number.isFinite(lineHeight)) {
@@ -25,7 +28,7 @@ export function ExpandableDescription({ description }: ExpandableDescriptionProp
         return
       }
 
-      setHasOverflow(measurementElement.scrollHeight > lineHeight * 4 + 1)
+      setHasOverflow(currentMeasurementElement.scrollHeight > lineHeight * 4 + 1)
     }
 
     updateOverflow()

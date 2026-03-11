@@ -190,7 +190,7 @@ function toggleArrayFilter<K extends 'ageRangeBuckets' | 'gradeLevelBuckets' | '
   key: K,
   value: string
 ) {
-  const current = filters[key] ?? []
+  const current: string[] = filters[key] ?? []
   const updated = current.includes(value) ? current.filter((item) => item !== value) : [...current, value]
 
   return { ...filters, [key]: updated.length > 0 ? updated : undefined }

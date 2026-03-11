@@ -1,7 +1,9 @@
 import { query } from '../_generated/server'
 import { paginationOptsValidator } from 'convex/server'
 import { v } from 'convex/values'
+import type { QueryCtx } from '../_generated/server'
 import { Id, Doc } from '../_generated/dataModel'
+import { isBookVisibleForDiscovery } from '../lib/bookVisibility'
 
 const publisherFields = v.object({
   _id: v.id('publishers'),
@@ -9,14 +11,6 @@ const publisherFields = v.object({
   slug: v.union(v.string(), v.null()),
   createdAt: v.number(),
 })
-
-async function resolveCoverUrl(
-  storage: { getUrl: (id: Id<'_storage'>) => Promise<string | null> },
-  book: Doc<'books'>,
-): Promise<string | null> {
-  const mediumId = book.cover?.storageIdMedium
-  return mediumId ? await storage.getUrl(mediumId) : null
-}
 
 /**
  * List publishers with pagination.
@@ -62,27 +56,17 @@ export const getBySlug = query({
     }),
   ),
   handler: async (context, args) => {
-    const publisher = await context.db
-      .query('publishers')
-      .withIndex('by_slug', (q) => q.eq('slug', args.slug))
-      .first()
-
+    const publisher = await getPublisherBySlug(context, args.slug)
     if (!publisher) return null
 
-    // Count books via editions
-    const editions = await context.db
-      .query('bookEditions')
-      .withIndex('by_publisherId', (q) => q.eq('publisherId', publisher._id))
-      .collect()
-
-    const uniqueBookIds = [...new Set(editions.map((e) => e.bookId))]
+    const visibleBooks = await getVisiblePublisherBooksByPublisherId(context, publisher._id)
 
     return {
       _id: publisher._id,
       name: publisher.name,
       slug: publisher.slug ?? null,
       createdAt: publisher.createdAt,
-      bookCount: uniqueBookIds.length,
+      bookCount: visibleBooks.length,
     }
   },
 })
@@ -113,29 +97,14 @@ export const listWithTopBooks = query({
 
     const results = await Promise.all(
       publishers.map(async (publisher) => {
-        const editions = await context.db
-          .query('bookEditions')
-          .withIndex('by_publisherId', (q) => q.eq('publisherId', publisher._id))
-          .collect()
-
-        const uniqueBookIds = [...new Set(editions.map((e) => e.bookId))]
-        const books = await Promise.all(uniqueBookIds.slice(0, 5).map((id) => context.db.get(id)))
-        const validBooks = books.filter((book): book is NonNullable<typeof book> => book !== null)
-
-        const booksWithCovers = await Promise.all(
-          validBooks.map(async (book) => ({
-            _id: book._id,
-            title: book.title,
-            slug: book.slug ?? null,
-            coverUrl: await resolveCoverUrl(context.storage, book),
-          })),
-        )
+        const visibleBooks = await getVisiblePublisherBooksByPublisherId(context, publisher._id)
+        const booksWithCovers = await buildPublisherTopBooks(context.storage, visibleBooks)
 
         return {
           _id: publisher._id,
           name: publisher.name,
           slug: publisher.slug ?? null,
-          bookCount: uniqueBookIds.length,
+          bookCount: visibleBooks.length,
           books: booksWithCovers,
         }
       }),
@@ -171,40 +140,91 @@ export const getBySlugWithBooks = query({
     }),
   ),
   handler: async (context, args) => {
-    const publisher = await context.db
-      .query('publishers')
-      .withIndex('by_slug', (q) => q.eq('slug', args.slug))
-      .first()
-
+    const publisher = await getPublisherBySlug(context, args.slug)
     if (!publisher) return null
 
-    const editions = await context.db
-      .query('bookEditions')
-      .withIndex('by_publisherId', (q) => q.eq('publisherId', publisher._id))
-      .collect()
-
-    const uniqueBookIds = [...new Set(editions.map((e) => e.bookId))]
-    const books = await Promise.all(uniqueBookIds.map((id) => context.db.get(id)))
-    const validBooks = books.filter((book): book is NonNullable<typeof book> => book !== null)
-
-    const booksWithCovers = await Promise.all(
-      validBooks.map(async (book) => ({
-        _id: book._id,
-        title: book.title,
-        authors: book.authors,
-        slug: book.slug ?? null,
-        coverUrl: await resolveCoverUrl(context.storage, book),
-        seriesPosition: book.seriesPosition ?? null,
-      })),
-    )
+    const visibleBooks = await getVisiblePublisherBooksByPublisherId(context, publisher._id)
+    const booksWithCovers = await buildPublisherBooksWithCovers(context.storage, visibleBooks)
 
     return {
       _id: publisher._id,
       name: publisher.name,
       slug: publisher.slug ?? null,
       createdAt: publisher.createdAt,
-      bookCount: uniqueBookIds.length,
+      bookCount: visibleBooks.length,
       books: booksWithCovers,
     }
   },
 })
+
+async function getPublisherBySlug(
+  context: QueryCtx,
+  slug: string,
+): Promise<Doc<'publishers'> | null> {
+  return await context.db
+    .query('publishers')
+    .withIndex('by_slug', (q) => q.eq('slug', slug))
+    .first()
+}
+
+async function getVisiblePublisherBooksByPublisherId(
+  context: QueryCtx,
+  publisherId: Id<'publishers'>,
+): Promise<Doc<'books'>[]> {
+  const bookIds = await getPublisherBookIds(context.db, publisherId)
+  const books = await Promise.all(bookIds.map((bookId) => context.db.get(bookId)))
+
+  return books.filter((book): book is NonNullable<typeof book> => book !== null && isBookVisibleForDiscovery(book))
+}
+
+async function getPublisherBookIds(
+  db: QueryCtx['db'],
+  publisherId: Id<'publishers'>,
+): Promise<Id<'books'>[]> {
+  const editions = await db
+    .query('bookEditions')
+    .withIndex('by_publisherId', (q) => q.eq('publisherId', publisherId))
+    .collect()
+
+  return [...new Set(editions.map((edition) => edition.bookId))]
+}
+
+async function buildPublisherTopBooks(
+  storage: { getUrl: (id: Id<'_storage'>) => Promise<string | null> },
+  books: Doc<'books'>[],
+) {
+  const topBooks = books.slice(0, 5)
+
+  return await Promise.all(
+    topBooks.map(async (book) => ({
+      _id: book._id,
+      title: book.title,
+      slug: book.slug ?? null,
+      coverUrl: await resolveCoverUrl(storage, book),
+    })),
+  )
+}
+
+async function buildPublisherBooksWithCovers(
+  storage: { getUrl: (id: Id<'_storage'>) => Promise<string | null> },
+  books: Doc<'books'>[],
+) {
+  return await Promise.all(
+    books.map(async (book) => ({
+      _id: book._id,
+      title: book.title,
+      authors: book.authors,
+      slug: book.slug ?? null,
+      coverUrl: await resolveCoverUrl(storage, book),
+      seriesPosition: book.seriesPosition ?? null,
+    })),
+  )
+}
+
+async function resolveCoverUrl(
+  storage: { getUrl: (id: Id<'_storage'>) => Promise<string | null> },
+  book: Doc<'books'>,
+): Promise<string | null> {
+  const mediumId = book.cover?.storageIdMedium
+  return mediumId ? await storage.getUrl(mediumId) : null
+}

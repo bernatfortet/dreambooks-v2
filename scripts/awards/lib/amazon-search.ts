@@ -23,49 +23,10 @@ export async function searchAmazonBookCandidates(params: {
 
         await page.waitForTimeout(1500)
 
-        const rawCandidates = await page.$$eval(
-          'div[data-component-type="s-search-result"][data-asin]',
-          (elements, maxResults) => {
-            const candidates: Array<{
-              asin: string
-              amazonUrl: string
-              title: string
-              byline?: string
-              rank: number
-            }> = []
-
-            for (const [index, element] of elements.entries()) {
-              if (candidates.length >= maxResults) break
-
-              const asin = element.getAttribute('data-asin')?.trim()
-              const titleLink =
-                (element.querySelector('a.s-line-clamp-2.s-link-style.a-text-normal') as HTMLAnchorElement | null) ??
-                (element.querySelector('h2 a') as HTMLAnchorElement | null) ??
-                (element.querySelector('a[href*="/dp/"]') as HTMLAnchorElement | null)
-              const title = titleLink?.textContent?.trim() ?? element.querySelector('h2')?.textContent?.trim()
-              const href = titleLink?.href
-
-              if (!asin || !title || !href) continue
-
-              const textNodes = Array.from(element.querySelectorAll('.a-row, .a-size-base, .a-size-small'))
-                .map((node) => node.textContent?.trim())
-                .filter((value): value is string => Boolean(value))
-
-              const byline = textNodes.find((value) => /^by\s+/i.test(value))?.replace(/^by\s+/i, '')
-
-              candidates.push({
-                asin,
-                amazonUrl: href.startsWith('http') ? href : `https://www.amazon.com${href}`,
-                title,
-                byline,
-                rank: index + 1,
-              })
-            }
-
-            return candidates
-          },
+        const rawCandidates = await extractAmazonCandidatesFromPage({
+          page,
           limit,
-        )
+        })
 
         return rawCandidates
       },
@@ -104,10 +65,50 @@ function buildAmazonSearchQueries(entry: NormalizedAwardEntry): string[] {
   const authorNames = entry.author ? collapseWhitespace(entry.author) : ''
   const illustratorNames = entry.illustrator ? collapseWhitespace(entry.illustrator) : ''
   const title = collapseWhitespace(entry.title)
-  const queries = [
-    collapseWhitespace([title, authorNames || illustratorNames].filter(Boolean).join(' ')),
-    title,
-  ]
+  const creatorNames = authorNames || illustratorNames
+  const queries = creatorNames ? [collapseWhitespace([title, creatorNames].filter(Boolean).join(' '))] : [title]
 
   return [...new Set(queries.filter(Boolean))]
+}
+
+async function extractAmazonCandidatesFromPage(params: {
+  page: Parameters<Parameters<typeof withBrowser>[0]['action']>[0]
+  limit: number
+}) {
+  const resultLocator = params.page.locator('div[data-component-type="s-search-result"][data-asin]')
+  const resultCount = await resultLocator.count()
+  const maxResults = Math.min(resultCount, params.limit)
+  const candidates: AwardImportAmazonCandidate[] = []
+
+  for (let index = 0; index < maxResults; index += 1) {
+    if (candidates.length >= params.limit) break
+
+    const element = resultLocator.nth(index)
+    const asin = collapseWhitespace((await element.getAttribute('data-asin', { timeout: 5000 }).catch(() => null)) ?? '')
+
+    if (!asin) continue
+
+    const titleLink = element.locator('h2 a').first()
+    const title = collapseWhitespace((await titleLink.textContent({ timeout: 1500 }).catch(() => null)) ?? '')
+    const href = await titleLink.getAttribute('href', { timeout: 1500 }).catch(() => null)
+
+    if (!title || !href) continue
+
+    const elementText = collapseWhitespace((await element.textContent({ timeout: 2000 }).catch(() => null)) ?? '')
+    const byline = elementText.match(/\bby\s+([^|]+?)(?=\s{2,}|Paperback|Hardcover|Kindle|Audio CD|Mass Market|Library Binding|Board book|$)/i)?.[1]
+      ? collapseWhitespace(
+          elementText.match(/\bby\s+([^|]+?)(?=\s{2,}|Paperback|Hardcover|Kindle|Audio CD|Mass Market|Library Binding|Board book|$)/i)?.[1] ?? '',
+        )
+      : undefined
+
+    candidates.push({
+      asin,
+      amazonUrl: href.startsWith('http') ? href : `https://www.amazon.com${href}`,
+      title,
+      byline,
+      rank: index + 1,
+    })
+  }
+
+  return candidates
 }

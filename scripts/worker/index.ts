@@ -281,6 +281,11 @@ Examples:
   bun worker --until-idle        Process queue and exit when done
   bun worker --until-idle=3      Exit after 3 consecutive idle polls
 
+Environment:
+  ENABLE_AUTOMATIC_VERSION_UPGRADES=true
+                         Enable full-table version upgrade scans
+                         Disabled by default to reduce Convex reads during testing
+
 Prerequisites:
   Start Chrome with remote debugging:
   /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222

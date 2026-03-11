@@ -77,8 +77,8 @@ export const scrapeSeries = action({
 
         if (existingBook) {
           skippedCount++
-          // Link existing book to series if not already linked
-          if (!existingBook.seriesId) {
+          // Also backfill seriesPosition for books already linked to this series.
+          if (!existingBook.seriesId || (existingBook.seriesId === args.seriesId && existingBook.seriesPosition == null && book.position != null)) {
             await context.runMutation(internal.series.mutations.linkBook, {
               bookId: existingBook._id,
               seriesId: args.seriesId,

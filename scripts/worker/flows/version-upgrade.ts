@@ -16,6 +16,7 @@ type FlowResult = {
 
 const RECENT_QUEUE_HISTORY_LIMIT = 200
 const AUTO_RESCRAPE_COOLDOWN_MS = 30 * 60 * 1000
+const AUTOMATIC_VERSION_UPGRADES_ENABLED = parseBooleanEnv(process.env.ENABLE_AUTOMATIC_VERSION_UPGRADES)
 
 /**
  * Flow: Queue outdated entities for re-scraping
@@ -26,6 +27,11 @@ const AUTO_RESCRAPE_COOLDOWN_MS = 30 * 60 * 1000
  */
 export async function processVersionUpgradeFlow(params: { dryRun: boolean }): Promise<FlowResult> {
   const { dryRun } = params
+
+  if (!AUTOMATIC_VERSION_UPGRADES_ENABLED) {
+    log('🔄 Automatic version upgrades disabled')
+    return { workDone: false }
+  }
 
   let workDone = false
 
@@ -128,4 +134,11 @@ function summarizeQueueError(errorMessage: string | undefined): string {
   if (firstLine.length <= maxLength) return firstLine
 
   return `${firstLine.slice(0, maxLength - 3)}...`
+}
+
+function parseBooleanEnv(value: string | undefined): boolean {
+  if (!value) return false
+
+  const normalizedValue = value.trim().toLowerCase()
+  return normalizedValue === '1' || normalizedValue === 'true' || normalizedValue === 'yes' || normalizedValue === 'on'
 }
