@@ -1,34 +1,36 @@
 'use client'
 
-import { useQuery } from 'convex/react'
+import { usePaginatedQuery } from 'convex/react'
 import type { FunctionReturnType } from 'convex/server'
 import { api } from '@/convex/_generated/api'
+import { PaginatedCollectionSection } from '@/components/collections/PaginatedCollectionSection'
 import Image from 'next/image'
 import Link from 'next/link'
 
 const DEFAULT_BOOK_COVER_ASPECT_RATIO = 2 / 3
+const AUTHORS_PAGE_SIZE = 10
 
-type AuthorListData = NonNullable<FunctionReturnType<typeof api.authors.queries.listWithTopBooks>>
-type AuthorListItem = AuthorListData[number]
+type AuthorListData = NonNullable<FunctionReturnType<typeof api.authors.queries.listWithTopBooksPaginated>>
+type AuthorListItem = AuthorListData['page'][number]
 type AuthorBook = AuthorItemProps['books'][number]
 
 export function AuthorList() {
-  const authors: AuthorListData | undefined = useQuery(api.authors.queries.listWithTopBooks)
-
-  if (authors === undefined) {
-    return <AuthorListSkeleton />
-  }
-
-  if (authors.length === 0) {
-    return <p className='text-center text-muted-foreground py-12'>No authors yet.</p>
-  }
+  const { results, status, loadMore } = usePaginatedQuery(api.authors.queries.listWithTopBooksPaginated, {}, {
+    initialNumItems: AUTHORS_PAGE_SIZE,
+  })
 
   return (
-    <div className='space-y-8'>
-      {authors.map((author: AuthorListItem) => (
-        <AuthorItem key={author._id} slug={author.slug ?? author._id} name={author.name} imageUrl={author.imageUrl} books={author.books} />
-      ))}
-    </div>
+    <PaginatedCollectionSection
+      emptyState={<p className='text-center text-muted-foreground py-12'>No authors yet.</p>}
+      items={results}
+      loadMore={loadMore}
+      loadingFallback={<AuthorListSkeleton />}
+      manualLoadLabel='Load more authors'
+      pageSize={AUTHORS_PAGE_SIZE}
+      renderItems={renderAuthorItems}
+      rootMargin='500px 0px'
+      status={status}
+    />
   )
 }
 
@@ -148,4 +150,14 @@ function getBookCoverAspectRatio(coverWidth: number | null, coverHeight: number 
 
 function getInitial(name: string) {
   return name.charAt(0).toUpperCase()
+}
+
+function renderAuthorItems(authors: AuthorListItem[]) {
+  return (
+    <div className='space-y-8'>
+      {authors.map((author) => (
+        <AuthorItem key={author._id} slug={author.slug ?? author._id} name={author.name} imageUrl={author.imageUrl} books={author.books} />
+      ))}
+    </div>
+  )
 }

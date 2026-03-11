@@ -4,12 +4,14 @@ import { useRef, useLayoutEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { usePaginatedQuery, useQuery } from 'convex/react'
 import { api } from '@/convex/_generated/api'
-import { Button } from '@/components/ui/button'
+import { PaginatedCollectionSection } from '@/components/collections/PaginatedCollectionSection'
 import { Id } from '@/convex/_generated/dataModel'
 import type { BookFilters } from '../filters/types'
 import { BookMasonryCard } from './BookMasonryCard'
 import { calculateMasonryLayout, type MasonryItem } from './useMasonryLayout'
 import { getColumnCount, getColumnWidth, MASONRY_GAP } from './constants'
+
+const BOOK_PAGE_SIZE = 24
 
 function BookMasonrySkeleton({ count = 12 }: { count?: number }) {
   return (
@@ -192,14 +194,14 @@ function FilteredBookMasonryGrid({ filters }: { filters: BookFilters }) {
   const { results, status, loadMore } = usePaginatedQuery(
     api.books.queries.listPaginatedWithFilters,
     buildFilteredQueryArgs(filters),
-    { initialNumItems: 24 },
+    { initialNumItems: BOOK_PAGE_SIZE },
   )
 
   return <PaginatedBookMasonryResults rawResults={results} status={status} loadMore={loadMore} />
 }
 
 function AllBooksMasonryGrid() {
-  const { results, status, loadMore } = usePaginatedQuery(api.books.queries.listPaginated, {}, { initialNumItems: 24 })
+  const { results, status, loadMore } = usePaginatedQuery(api.books.queries.listPaginated, {}, { initialNumItems: BOOK_PAGE_SIZE })
 
   return <PaginatedBookMasonryResults rawResults={results} status={status} loadMore={loadMore} />
 }
@@ -211,31 +213,25 @@ type PaginatedBookMasonryResultsProps = {
 }
 
 function PaginatedBookMasonryResults({ rawResults, status, loadMore }: PaginatedBookMasonryResultsProps) {
+  return (
+    <PaginatedCollectionSection
+      emptyState={<p className='text-center text-muted-foreground py-12'>No books yet.</p>}
+      items={rawResults}
+      loadMore={loadMore}
+      loadingFallback={<BookMasonrySkeleton />}
+      manualLoadLabel='Load more books'
+      pageSize={BOOK_PAGE_SIZE}
+      renderItems={renderPaginatedBookMasonryItems}
+      rootMargin='1400px 0px'
+      status={status}
+    />
+  )
+}
+
+function renderPaginatedBookMasonryItems(rawResults: QueryBook[]) {
   const results = rawResults.map(transformToMasonryItem)
 
-  if (status === 'LoadingFirstPage') {
-    return <BookMasonrySkeleton />
-  }
-
-  return (
-    <div className='space-y-8'>
-      <BookMasonryList books={results} />
-
-      {status === 'CanLoadMore' ? (
-        <div className='flex justify-center'>
-          <Button variant='outline' onClick={() => loadMore(24)}>
-            Load more
-          </Button>
-        </div>
-      ) : null}
-
-      {status === 'LoadingMore' ? (
-        <div className='flex justify-center'>
-          <p className='text-muted-foreground'>Loading...</p>
-        </div>
-      ) : null}
-    </div>
-  )
+  return <BookMasonryList books={results} />
 }
 
 function transformToMasonryItem(book: QueryBook): BookMasonryItem {

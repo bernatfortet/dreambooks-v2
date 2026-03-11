@@ -147,6 +147,78 @@ function paginateCollectionPage<T extends { _id: string }>(
   }
 }
 
+async function getBookIdsWithAwards(
+  db: DatabaseReader,
+  awardIds: Id<'awards'>[],
+) {
+  const bookIdsWithAwards = new Set<string>()
+
+  for (const awardId of awardIds) {
+    const bookAwardLinks = await db
+      .query('bookAwards')
+      .withIndex('by_awardId', (q) => q.eq('awardId', awardId))
+      .collect()
+
+    for (const link of bookAwardLinks) {
+      bookIdsWithAwards.add(link.bookId)
+    }
+  }
+
+  return bookIdsWithAwards
+}
+
+type DiscoveryFilters = {
+  ageRangeBuckets?: string[]
+  gradeLevelBuckets?: string[]
+  awardIds?: Id<'awards'>[]
+  seriesFilter?: 'all' | 'with-series' | 'standalone'
+}
+
+async function filterBooksWithDiscoveryFilters(
+  db: DatabaseReader,
+  books: Doc<'books'>[],
+  filters: DiscoveryFilters,
+) {
+  let filteredBooks = books
+
+  if (filters.seriesFilter === 'with-series') {
+    filteredBooks = filteredBooks.filter((book) => book.seriesId !== undefined)
+  } else if (filters.seriesFilter === 'standalone') {
+    filteredBooks = filteredBooks.filter((book) => book.seriesId === undefined)
+  }
+
+  if (filters.ageRangeBuckets?.length) {
+    const selectedBuckets = AGE_RANGE_BUCKETS.filter((bucket) => filters.ageRangeBuckets?.includes(bucket.id))
+
+    filteredBooks = filteredBooks.filter((book) => {
+      if (book.ageRangeMin === undefined || book.ageRangeMax === undefined) {
+        return false
+      }
+
+      return selectedBuckets.some((bucket) => ageRangeOverlaps(book.ageRangeMin!, book.ageRangeMax!, bucket.min, bucket.max))
+    })
+  }
+
+  if (filters.gradeLevelBuckets?.length) {
+    const selectedBuckets = GRADE_LEVEL_BUCKETS.filter((bucket) => filters.gradeLevelBuckets?.includes(bucket.id))
+
+    filteredBooks = filteredBooks.filter((book) => {
+      if (book.gradeLevelMin === undefined || book.gradeLevelMax === undefined) {
+        return false
+      }
+
+      return selectedBuckets.some((bucket) => gradeLevelOverlaps(book.gradeLevelMin!, book.gradeLevelMax!, bucket.min, bucket.max))
+    })
+  }
+
+  if (filters.awardIds?.length) {
+    const bookIdsWithAwards = await getBookIdsWithAwards(db, filters.awardIds)
+    filteredBooks = filteredBooks.filter((book) => bookIdsWithAwards.has(book._id))
+  }
+
+  return filteredBooks
+}
+
 export const list = query({
   handler: async (context) => {
     const allBooks = await context.db.query('books').collect()
@@ -225,65 +297,8 @@ export const listPaginatedWithFilters = query({
   },
   handler: async (context, args) => {
     const filters = args.filters || {}
-    let allBooks = filterVisibleBooks(await context.db.query('books').order('desc').collect())
-
-    // Filter by series
-    if (filters.seriesFilter === 'with-series') {
-      allBooks = allBooks.filter((book) => book.seriesId !== undefined)
-    } else if (filters.seriesFilter === 'standalone') {
-      allBooks = allBooks.filter((book) => book.seriesId === undefined)
-    }
-
-    // Filter by age range buckets (using numeric fields)
-    if (filters.ageRangeBuckets && filters.ageRangeBuckets.length > 0) {
-      // Get the bucket definitions for selected IDs
-      const selectedBuckets = AGE_RANGE_BUCKETS.filter((b) => filters.ageRangeBuckets!.includes(b.id))
-
-      allBooks = allBooks.filter((book) => {
-        // Book must have numeric age range fields
-        if (book.ageRangeMin === undefined || book.ageRangeMax === undefined) {
-          return false
-        }
-
-        // Check if book overlaps with any selected bucket
-        return selectedBuckets.some((bucket) => ageRangeOverlaps(book.ageRangeMin!, book.ageRangeMax!, bucket.min, bucket.max))
-      })
-    }
-
-    // Filter by grade level buckets (using numeric fields)
-    if (filters.gradeLevelBuckets && filters.gradeLevelBuckets.length > 0) {
-      // Get the bucket definitions for selected IDs
-      const selectedBuckets = GRADE_LEVEL_BUCKETS.filter((b) => filters.gradeLevelBuckets!.includes(b.id))
-
-      allBooks = allBooks.filter((book) => {
-        // Book must have numeric grade level fields
-        if (book.gradeLevelMin === undefined || book.gradeLevelMax === undefined) {
-          return false
-        }
-
-        // Check if book overlaps with any selected bucket
-        return selectedBuckets.some((bucket) => gradeLevelOverlaps(book.gradeLevelMin!, book.gradeLevelMax!, bucket.min, bucket.max))
-      })
-    }
-
-    // Filter by awards (requires join table lookup)
-    if (filters.awardIds && filters.awardIds.length > 0) {
-      const bookIdsWithAwards = new Set<string>()
-
-      // Get all bookAwards entries for the specified awards
-      for (const awardId of filters.awardIds) {
-        const bookAwardLinks = await context.db
-          .query('bookAwards')
-          .withIndex('by_awardId', (q) => q.eq('awardId', awardId))
-          .collect()
-
-        for (const link of bookAwardLinks) {
-          bookIdsWithAwards.add(link.bookId)
-        }
-      }
-
-      allBooks = allBooks.filter((book) => bookIdsWithAwards.has(book._id))
-    }
+    const visibleBooks = filterVisibleBooks(await context.db.query('books').order('desc').collect())
+    const allBooks = await filterBooksWithDiscoveryFilters(context.db, visibleBooks, filters)
 
     sortBooksForDiscovery(allBooks)
 
